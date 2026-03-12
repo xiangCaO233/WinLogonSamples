@@ -1,0 +1,13 @@
+Windows Registry Editor Version 5.00
+
+; 1. 声明 COM 组件
+[HKEY_CLASSES_ROOT\CLSID\{2fe4e142-a22c-4596-82e3-22c8c7ee47e0}]
+@="MyDemoProvider"
+
+[HKEY_CLASSES_ROOT\CLSID\{2fe4e142-a22c-4596-82e3-22c8c7ee47e0}\InprocServer32]
+@="C:\\Windows\\System32\\CredentialProviderDemo.dll"
+"ThreadingModel"="Apartment"
+
+; 2. 注册为登录插件
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\{2fe4e142-a22c-4596-82e3-22c8c7ee47e0}]
+@="MyDemoProvider"

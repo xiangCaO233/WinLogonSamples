@@ -1,0 +1,7 @@
+add_subdirectory(helpers)
+
+add_subdirectory(samplecredentialprovider)
+add_subdirectory(sampleallcontrolscredentialprovider)
+add_subdirectory(samplecreduicredentialprovider)
+add_subdirectory(samplehardwareeventcredentialprovider)
+add_subdirectory(samplewrapexistingcredentialprovider)
