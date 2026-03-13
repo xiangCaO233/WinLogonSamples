@@ -1,8 +1,13 @@
 add_library(SampleWrapExistingCredentialProvider SHARED
 	guid.cpp
-	CSampleProvider.cpp
-	CSampleCredential.cpp
-	CWrappedCredentialEvents.cpp
+	provider/CSampleProvider.cpp
+	provider/CSampleProviderAdvise.cpp
+	provider/CSampleProviderCredential.cpp
+	provider/CSampleProviderFieldDescriptor.cpp
+	provider/CSampleProviderSetSerialization.cpp
+	provider/CSampleProviderUsageScenario.cpp
+	credential/CSampleCredential.cpp
+	credential/events/CWrappedCredentialEvents.cpp
 	resources.rc
 	SampleWrapExistingCredentialProvider.def
 )

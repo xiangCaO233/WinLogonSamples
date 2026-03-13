@@ -16,7 +16,7 @@
 #include <unknwn.h>
 
 #include "CSampleCredential.h"
-#include "CWrappedCredentialEvents.h"
+#include "events/CWrappedCredentialEvents.h"
 #include "guid.h"
 
 /**
@@ -232,6 +232,7 @@ HRESULT CSampleCredential::GetFieldState(__in DWORD                             
 /** @brief 获取字段显示的文本。逻辑同上：转发或本地返回。 */
 HRESULT CSampleCredential::GetStringValue(__in DWORD dwFieldID, __deref_out PWSTR* ppwsz)
 {
+
     HRESULT hr = E_UNEXPECTED;
 
     if (_pWrappedCredential != NULL)

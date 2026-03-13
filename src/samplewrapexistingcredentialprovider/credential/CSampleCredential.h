@@ -16,7 +16,7 @@
 #include "common.h"
 #include "dll.h"
 #include "resource.h"
-#include "CWrappedCredentialEvents.h"  // 用于包装事件回调的转换器
+#include "events/CWrappedCredentialEvents.h"  // 用于包装事件回调的转换器
 
 class CSampleCredential : public ICredentialProviderCredential
 {
@@ -192,4 +192,6 @@ class CSampleCredential : public ICredentialProviderCredential
 
     /** @brief 存储用户在下拉列表中选择的索引（如选择“Operations”）。 */
     DWORD _dwDatabaseIndex;
+
+    PWSTR _pszUserEnteredAuthCode;
 };

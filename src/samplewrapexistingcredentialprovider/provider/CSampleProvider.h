@@ -16,7 +16,7 @@
 #include <windows.h>
 #include <strsafe.h>
 
-#include "CSampleCredential.h"  // 具体磁贴实例的类定义
+#include "../credential/CSampleCredential.h"  // 具体磁贴实例的类定义
 #include "helpers.h"
 
 /**
