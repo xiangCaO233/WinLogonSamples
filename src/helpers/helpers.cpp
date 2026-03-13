@@ -1,39 +1,52 @@
-//
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
-//
-// Copyright (c) Microsoft Corporation. All rights reserved.
-//
-// Helper functions for copying parameters and packaging the buffer
-// for GetSerialization.
-
+/**
+ * @file helpers.cpp
+ * @brief 凭据提供程序辅助函数实现。
+ *
+ * 本文件包含了用于处理 Windows 登录凭据包的关键逻辑。
+ * 核心功能包括：
+ * 1. 内存管理（COM 内存与普通堆内存）。
+ * 2. 凭据打包（将指针结构转换为偏移量结构，用于跨进程传递给 LSASS）。
+ * 3. 安全处理（密码加密与内存抹除）。
+ * 4. 身份验证包交互（与 LSA 系统连接）。
+ */
 
 #include "helpers.h"
 #include <intsafe.h>
 #include <wincred.h>
 
-//
-// Copies the field descriptor pointed to by rcpfd into a buffer allocated
-// using CoTaskMemAlloc. Returns that buffer in ppcpfd.
-//
-HRESULT FieldDescriptorCoAllocCopy(
-    __in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR&   rcpfd,
-    __deref_out CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR** ppcpfd)
+/**
+ * @brief 深度拷贝一个字段描述符，并使用 CoTaskMemAlloc 分配内存。
+ *
+ * @details 凭据提供程序需要向 Windows 系统（LogonUI）提供 UI
+ * 字段描述。由于这些描述 是跨 COM 接口传递的，因此必须使用 COM
+ * 内存管理器分配内存，以确保系统能正确释放。
+ *
+ * @param[in]  rcpfd  源字段描述符结构体引用。
+ * @param[out] ppcpfd 指向目标的指针的指针。成功时指向新分配的内存。
+ *
+ * @return HRESULT 成功返回 S_OK，内存不足返回 E_OUTOFMEMORY。
+ */
+HRESULT FieldDescriptorCoAllocCopy(__in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR&   rcpfd,
+                                   __deref_out CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR** ppcpfd)
 {
     HRESULT hr;
-    DWORD   cbStruct = sizeof(**ppcpfd);
+    DWORD   cbStruct = sizeof(**ppcpfd);  // 计算结构体本身的大小
 
+    // 1. 分配结构体内存。必须用 CoTaskMemAlloc，因为这是给 Windows
+    // 系统的接口使用的
     CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* pcpfd =
         (CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR*)CoTaskMemAlloc(cbStruct);
-    if ( pcpfd )
+
+    if (pcpfd)
     {
+        // 2. 复制非指针型成员（ID 和 字段类型）
         pcpfd->dwFieldID = rcpfd.dwFieldID;
         pcpfd->cpft      = rcpfd.cpft;
 
-        if ( rcpfd.pszLabel )
+        // 3. 处理标签字符串（如 "用户名:"）。字符串也必须是新分配的副本。
+        if (rcpfd.pszLabel)
         {
+            // SHStrDupW 内部会调用 CoTaskMemAlloc 分配内存并拷贝字符串
             hr = SHStrDupW(rcpfd.pszLabel, &pcpfd->pszLabel);
         }
         else
@@ -47,7 +60,8 @@ HRESULT FieldDescriptorCoAllocCopy(
         hr = E_OUTOFMEMORY;
     }
 
-    if ( SUCCEEDED(hr) )
+    // 4. 如果中间步骤失败，清理已分配的内存，防止泄漏
+    if (SUCCEEDED(hr))
     {
         *ppcpfd = pcpfd;
     }
@@ -60,14 +74,17 @@ HRESULT FieldDescriptorCoAllocCopy(
     return hr;
 }
 
-//
-// Coppies rcpfd into the buffer pointed to by pcpfd. The caller is responsible
-// for allocating pcpfd. This function uses CoTaskMemAlloc to allocate memory
-// for pcpfd->pszLabel.
-//
-HRESULT FieldDescriptorCopy(
-    __in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR&  rcpfd,
-    __deref_out CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* pcpfd)
+/**
+ * @brief 拷贝字段描述符到预分配的缓冲区。
+ *
+ * @param[in]  rcpfd  源描述符。
+ * @param[out] pcpfd  目标描述符指针（假设其结构体空间已由调用者分配）。
+ *
+ * @return HRESULT。
+ */
+HRESULT
+FieldDescriptorCopy(__in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR&  rcpfd,
+                    __deref_out CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* pcpfd)
 {
     HRESULT                              hr;
     CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR cpfd;
@@ -75,7 +92,8 @@ HRESULT FieldDescriptorCopy(
     cpfd.dwFieldID = rcpfd.dwFieldID;
     cpfd.cpft      = rcpfd.cpft;
 
-    if ( rcpfd.pszLabel )
+    // 虽然结构体本身不是动态分配的，但其中的 pszLabel 必须是独立的副本
+    if (rcpfd.pszLabel)
     {
         hr = SHStrDupW(rcpfd.pszLabel, &cpfd.pszLabel);
     }
@@ -85,7 +103,7 @@ HRESULT FieldDescriptorCopy(
         hr            = S_OK;
     }
 
-    if ( SUCCEEDED(hr) )
+    if (SUCCEEDED(hr))
     {
         *pcpfd = cpfd;
     }
@@ -93,42 +111,45 @@ HRESULT FieldDescriptorCopy(
     return hr;
 }
 
-//
-// This function copies the length of pwz and the pointer pwz into the
-// UNICODE_STRING structure This function is intended for serializing a
-// credential in GetSerialization only. Note that this function just makes a
-// copy of the string pointer. It DOES NOT ALLOCATE storage! Be very, very sure
-// that this is what you want, because it probably isn't outside of the exact
-// GetSerialization call where the sample uses it.
-//
-HRESULT UnicodeStringInitWithString(__in PWSTR                  pwz,
-                                    __deref_out UNICODE_STRING* pus)
+/**
+ * @brief 初始化 UNICODE_STRING 结构体。
+ *
+ * @details 这是一个受限的辅助函数，主要用于序列化。它执行**浅拷贝**。
+ * 它不分配内存，只是让 UNICODE_STRING 指向 pwz。
+ *
+ * @param[in]  pwz 原始宽字符串。
+ * @param[out] pus 初始化的 UNICODE_STRING 结构。
+ *
+ * @return HRESULT。
+ */
+HRESULT UnicodeStringInitWithString(__in PWSTR pwz, __deref_out UNICODE_STRING* pus)
 {
     HRESULT hr;
-    if ( pwz )
+    if (pwz)
     {
-        size_t lenString = lstrlenW(pwz);
+        size_t lenString = lstrlenW(pwz);  // 获取字符数
         USHORT usCharCount;
+
+        // 1. 安全转换：检查字符数是否超过了 USHORT（UNICODE_STRING 的上限）
         hr = SizeTToUShort(lenString, &usCharCount);
-        if ( SUCCEEDED(hr) )
+        if (SUCCEEDED(hr))
         {
             USHORT usSize;
             hr = SizeTToUShort(sizeof(WCHAR), &usSize);
-            if ( SUCCEEDED(hr) )
+            if (SUCCEEDED(hr))
             {
-                hr = UShortMult(usCharCount,
-                                usSize,
-                                &(pus->Length));  // Explicitly NOT including
-                                                  // NULL terminator
-                if ( SUCCEEDED(hr) )
+                // 2. 计算字节长度。注意：UNICODE_STRING 的 Length 不包含 NULL 终止符。
+                hr = UShortMult(usCharCount, usSize, &(pus->Length));
+                if (SUCCEEDED(hr))
                 {
+                    // 3. 设置 Buffer。只是弱引用，指向原内存。
                     pus->MaximumLength = pus->Length;
                     pus->Buffer        = pwz;
                     hr                 = S_OK;
                 }
                 else
                 {
-                    hr = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+                    hr = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);  // 算术溢出
                 }
             }
         }
@@ -140,72 +161,59 @@ HRESULT UnicodeStringInitWithString(__in PWSTR                  pwz,
     return hr;
 }
 
-//
-// The following function is intended to be used ONLY with the Kerb*Pack
-// functions.  It does no bounds-checking because its callers have precise
-// requirements and are written to respect its limitations. You can read more
-// about the UNICODE_STRING type at:
-// http://msdn.microsoft.com/library/default.asp?url=/library/en-us/secauthn/security/unicode_string.asp
-//
-static void _UnicodeStringPackedUnicodeStringCopy(
-    __in const UNICODE_STRING& rus, __in PWSTR pwzBuffer,
-    __out UNICODE_STRING* pus)
+/**
+ * @brief 将 UNICODE_STRING 的数据拷贝到指定的打包缓冲区中。
+ *
+ * @param[in]  rus       源 UNICODE_STRING（包含真实地址指针）。
+ * @param[in]  pwzBuffer 打包缓冲区中的目标物理地址。
+ * @param[out] pus       目标 UNICODE_STRING。
+ */
+static void _UnicodeStringPackedUnicodeStringCopy(__in const UNICODE_STRING& rus,
+                                                  __in PWSTR pwzBuffer, __out UNICODE_STRING* pus)
 {
     pus->Length        = rus.Length;
     pus->MaximumLength = rus.Length;
-    pus->Buffer        = pwzBuffer;
+    pus->Buffer        = pwzBuffer;  // 此时还是真实地址
 
+    // 物理拷贝字符串内容
     CopyMemory(pus->Buffer, rus.Buffer, pus->Length);
 }
 
-//
-// Initialize the members of a KERB_INTERACTIVE_UNLOCK_LOGON with weak
-// references to the passed-in strings.  This is useful if you will later use
-// KerbInteractiveUnlockLogonPack to serialize the structure.
-//
-// The password is stored in encrypted form for CPUS_LOGON and
-// CPUS_UNLOCK_WORKSTATION because the system can accept encrypted credentials.
-// It is not encrypted in CPUS_CREDUI because we cannot know whether our caller
-// can accept encrypted credentials.
-//
-HRESULT KerbInteractiveUnlockLogonInit(
-    __in PWSTR pwzDomain, __in PWSTR pwzUsername, __in PWSTR pwzPassword,
-    __in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
-    __out KERB_INTERACTIVE_UNLOCK_LOGON*    pkiul)
+/**
+ * @brief 初始化用于 Kerberos 身份验证的结构体。
+ *
+ * @details 准备一个 KERB_INTERACTIVE_UNLOCK_LOGON 结构，它是 Windows
+ * 标准的登录凭据载体。
+ *
+ * @param[in]  pwzDomain   域名。
+ * @param[in]  pwzUsername 用户名。
+ * @param[in]  pwzPassword 密码（可能是已加密的）。
+ * @param[in]  cpus        当前场景（登录、解锁或 CredUI）。
+ * @param[out] pkiul       返回初始化好的结构。
+ */
+HRESULT
+KerbInteractiveUnlockLogonInit(__in PWSTR pwzDomain, __in PWSTR pwzUsername, __in PWSTR pwzPassword,
+                               __in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
+                               __out KERB_INTERACTIVE_UNLOCK_LOGON*    pkiul)
 {
     KERB_INTERACTIVE_UNLOCK_LOGON kiul;
     ZeroMemory(&kiul, sizeof(kiul));
 
     KERB_INTERACTIVE_LOGON* pkil = &kiul.Logon;
 
-    // Note: this method uses custom logic to pack a
-    // KERB_INTERACTIVE_UNLOCK_LOGON with a serialized credential.  We could
-    // replace the calls to UnicodeStringInitWithString and
-    // KerbInteractiveUnlockLogonPack with a single cal to
-    // CredPackAuthenticationBuffer, but that API has a drawback: it returns a
-    // KERB_INTERACTIVE_UNLOCK_LOGON whose MessageType is always
-    // KerbInteractiveLogon.
-    //
-    // If we only handled CPUS_LOGON, this drawback would not be a problem.  For
-    // CPUS_UNLOCK_WORKSTATION, we could cast the output buffer of
-    // CredPackAuthenticationBuffer to KERB_INTERACTIVE_UNLOCK_LOGON and modify
-    // the MessageType to KerbWorkstationUnlockLogon, but such a cast would be
-    // unsupported -- the output format of CredPackAuthenticationBuffer is not
-    // officially documented.
-
-    // Initialize the UNICODE_STRINGS to share our username and password
-    // strings.
+    // 1. 分别初始化域名、用户名和密码的描述符（弱引用）
     HRESULT hr = UnicodeStringInitWithString(pwzDomain, &pkil->LogonDomainName);
-    if ( SUCCEEDED(hr) )
+    if (SUCCEEDED(hr))
     {
         hr = UnicodeStringInitWithString(pwzUsername, &pkil->UserName);
-        if ( SUCCEEDED(hr) )
+        if (SUCCEEDED(hr))
         {
             hr = UnicodeStringInitWithString(pwzPassword, &pkil->Password);
-            if ( SUCCEEDED(hr) )
+            if (SUCCEEDED(hr))
             {
-                // Set a MessageType based on the usage scenario.
-                switch ( cpus )
+                // 2. 根据场景选择 MessageType。这是告诉 LSA
+                // 该执行登录还是解锁操作的核心标志。
+                switch (cpus)
                 {
                 case CPUS_UNLOCK_WORKSTATION:
                     pkil->MessageType = KerbWorkstationUnlockLogon;
@@ -218,20 +226,18 @@ HRESULT KerbInteractiveUnlockLogonInit(
                     break;
 
                 case CPUS_CREDUI:
-                    pkil->MessageType =
-                        (KERB_LOGON_SUBMIT_TYPE)0;  // MessageType does not
-                                                    // apply to CredUI
-                    hr = S_OK;
+                    pkil->MessageType = (KERB_LOGON_SUBMIT_TYPE)0;  // CredUI 不需要消息类型
+                    hr                = S_OK;
                     break;
 
-                default: hr = E_FAIL; break;
+                default:
+                    hr = E_FAIL;
+                    break;
                 }
 
-                if ( SUCCEEDED(hr) )
+                if (SUCCEEDED(hr))
                 {
-                    // KERB_INTERACTIVE_UNLOCK_LOGON is just a series of
-                    // structures.  A flat copy will properly initialize the
-                    // output parameter.
+                    // 3. 执行结构体内存拷贝
                     CopyMemory(pkiul, &kiul, sizeof(*pkiul));
                 }
             }
@@ -241,74 +247,55 @@ HRESULT KerbInteractiveUnlockLogonInit(
     return hr;
 }
 
-//
-// WinLogon and LSA consume "packed" KERB_INTERACTIVE_UNLOCK_LOGONs.  In these,
-// the PWSTR members of each UNICODE_STRING are not actually pointers but byte
-// offsets into the overall buffer represented by the packed
-// KERB_INTERACTIVE_UNLOCK_LOGON.  For example:
-//
-// rkiulIn.Logon.LogonDomainName.Length = 14 -> Length is in bytes, not
-// characters rkiulIn.Logon.LogonDomainName.Buffer =
-// sizeof(KERB_INTERACTIVE_UNLOCK_LOGON) -> LogonDomainName begins immediately
-//                                                                              after the KERB_... struct in the buffer
-// rkiulIn.Logon.UserName.Length = 10
-// rkiulIn.Logon.UserName.Buffer = sizeof(KERB_INTERACTIVE_UNLOCK_LOGON) + 14 ->
-// UNICODE_STRINGS are NOT null-terminated
-//
-// rkiulIn.Logon.Password.Length = 16
-// rkiulIn.Logon.Password.Buffer = sizeof(KERB_INTERACTIVE_UNLOCK_LOGON) + 14 +
-// 10
-//
-// THere's more information on this at:
-// http://msdn.microsoft.com/msdnmag/issues/05/06/SecurityBriefs/#void
-//
-
-HRESULT KerbInteractiveUnlockLogonPack(
-    __in const KERB_INTERACTIVE_UNLOCK_LOGON& rkiulIn,
-    __deref_out_bcount(*pcb) BYTE** prgb, __out DWORD* pcb)
+/**
+ * @brief 将凭据结构体打包成二进制流（序列化）。
+ *
+ * @details
+ * **重要原理：** LSASS 进程无法直接访问 LogonUI 进程的内存。
+ * 因此，结构体中的 `Buffer`
+ * 指针不能存放真实地址，必须改为“相对于结构体起始位置的偏移量”。
+ *
+ * @param[in]  rkiulIn 已经填充好真实字符串指针的源结构。
+ * @param[out] prgb    输出参数：新分配的连续二进制块地址。
+ * @param[out] pcb     输出参数：二进制块的总字节数。
+ */
+HRESULT KerbInteractiveUnlockLogonPack(__in const KERB_INTERACTIVE_UNLOCK_LOGON& rkiulIn,
+                                       __deref_out_bcount(*pcb) BYTE** prgb, __out DWORD* pcb)
 {
-    HRESULT hr;
-
+    HRESULT                       hr;
     const KERB_INTERACTIVE_LOGON* pkilIn = &rkiulIn.Logon;
 
-    // alloc space for struct plus extra for the three strings
-    DWORD cb = sizeof(rkiulIn) + pkilIn->LogonDomainName.Length +
-               pkilIn->UserName.Length + pkilIn->Password.Length;
+    // 1. 计算总大小：基础结构体大小 + 所有字符串数据的字节长度
+    DWORD cb = sizeof(rkiulIn) + pkilIn->LogonDomainName.Length + pkilIn->UserName.Length +
+               pkilIn->Password.Length;
 
-    KERB_INTERACTIVE_UNLOCK_LOGON* pkiulOut =
-        (KERB_INTERACTIVE_UNLOCK_LOGON*)CoTaskMemAlloc(cb);
-    if ( pkiulOut )
+    // 2. 分配整块连续内存
+    KERB_INTERACTIVE_UNLOCK_LOGON* pkiulOut = (KERB_INTERACTIVE_UNLOCK_LOGON*)CoTaskMemAlloc(cb);
+
+    if (pkiulOut)
     {
         ZeroMemory(&pkiulOut->LogonId, sizeof(pkiulOut->LogonId));
 
-        //
-        // point pbBuffer at the beginning of the extra space
-        //
-        BYTE* pbBuffer = (BYTE*)pkiulOut + sizeof(*pkiulOut);
-
-        //
-        // set up the Logon structure within the KERB_INTERACTIVE_UNLOCK_LOGON
-        //
-        KERB_INTERACTIVE_LOGON* pkilOut = &pkiulOut->Logon;
+        // pbBuffer 指向结构体末尾之后，即存放字符串数据的开始位置
+        BYTE*                   pbBuffer = (BYTE*)pkiulOut + sizeof(*pkiulOut);
+        KERB_INTERACTIVE_LOGON* pkilOut  = &pkiulOut->Logon;
 
         pkilOut->MessageType = pkilIn->MessageType;
 
-        //
-        // copy each string,
-        // fix up appropriate buffer pointer to be offset,
-        // advance buffer pointer over copied characters in extra space
-        //
-        _UnicodeStringPackedUnicodeStringCopy(pkilIn->LogonDomainName,
-                                              (PWSTR)pbBuffer,
-                                              &pkilOut->LogonDomainName);
+        // 3. 打包域名字符串
+        _UnicodeStringPackedUnicodeStringCopy(
+            pkilIn->LogonDomainName, (PWSTR)pbBuffer, &pkilOut->LogonDomainName);
+        // 核心转换：将真实的内存地址改为“相对偏移量”
         pkilOut->LogonDomainName.Buffer = (PWSTR)(pbBuffer - (BYTE*)pkiulOut);
         pbBuffer += pkilOut->LogonDomainName.Length;
 
+        // 4. 打包用户名
         _UnicodeStringPackedUnicodeStringCopy(
             pkilIn->UserName, (PWSTR)pbBuffer, &pkilOut->UserName);
         pkilOut->UserName.Buffer = (PWSTR)(pbBuffer - (BYTE*)pkiulOut);
         pbBuffer += pkilOut->UserName.Length;
 
+        // 5. 打包密码
         _UnicodeStringPackedUnicodeStringCopy(
             pkilIn->Password, (PWSTR)pbBuffer, &pkilOut->Password);
         pkilOut->Password.Buffer = (PWSTR)(pbBuffer - (BYTE*)pkiulOut);
@@ -326,17 +313,15 @@ HRESULT KerbInteractiveUnlockLogonPack(
     return hr;
 }
 
-//
-// This function packs the string pszSourceString in pszDestinationString
-// for use with LSA functions including LsaLookupAuthenticationPackage.
-//
-static HRESULT _LsaInitString(__out PSTRING pszDestinationString,
-                              __in PCSTR    pszSourceString)
+/**
+ * @brief 为 LSA 交互初始化 ANSI 字符串结构体。
+ */
+static HRESULT _LsaInitString(__out PSTRING pszDestinationString, __in PCSTR pszSourceString)
 {
     size_t  cchLength = lstrlenA(pszSourceString);
     USHORT  usLength;
     HRESULT hr = SizeTToUShort(cchLength, &usLength);
-    if ( SUCCEEDED(hr) )
+    if (SUCCEEDED(hr))
     {
         pszDestinationString->Buffer        = (PCHAR)pszSourceString;
         pszDestinationString->Length        = usLength;
@@ -346,26 +331,29 @@ static HRESULT _LsaInitString(__out PSTRING pszDestinationString,
     return hr;
 }
 
-//
-// Retrieves the 'negotiate' AuthPackage from the LSA. In this case, Kerberos
-// For more information on auth packages see this msdn page:
-// http://msdn.microsoft.com/library/default.asp?url=/library/en-us/secauthn/security/msv1_0_lm20_logon.asp
-//
+/**
+ * @brief 从 LSA 获取“Negotiate”身份验证包的 ID。
+ *
+ * @details Negotiate 包是 Windows 的混合验证包，会自动在 Kerberos 和 NTLM
+ * 之间切换。
+ */
 HRESULT RetrieveNegotiateAuthPackage(__out ULONG* pulAuthPackage)
 {
     HRESULT hr;
     HANDLE  hLsa;
 
+    // 1. 建立 LSA 连接（非受信任模式即可）
     NTSTATUS status = LsaConnectUntrusted(&hLsa);
-    if ( SUCCEEDED(HRESULT_FROM_NT(status)) )
+    if (SUCCEEDED(HRESULT_FROM_NT(status)))
     {
         ULONG      ulAuthPackage;
         LSA_STRING lsaszKerberosName;
+        // 初始化包名称字符串为 "Negotiate"
         _LsaInitString(&lsaszKerberosName, NEGOSSP_NAME_A);
 
-        status = LsaLookupAuthenticationPackage(
-            hLsa, &lsaszKerberosName, &ulAuthPackage);
-        if ( SUCCEEDED(HRESULT_FROM_NT(status)) )
+        // 2. 查找包的内部 ID
+        status = LsaLookupAuthenticationPackage(hLsa, &lsaszKerberosName, &ulAuthPackage);
+        if (SUCCEEDED(HRESULT_FROM_NT(status)))
         {
             *pulAuthPackage = ulAuthPackage;
             hr              = S_OK;
@@ -384,54 +372,50 @@ HRESULT RetrieveNegotiateAuthPackage(__out ULONG* pulAuthPackage)
     return hr;
 }
 
-//
-// Return a copy of pwzToProtect encrypted with the CredProtect API.
-//
-// pwzToProtect must not be NULL or the empty string.
-//
-static HRESULT _ProtectAndCopyString(__in PCWSTR        pwzToProtect,
-                                     __deref_out PWSTR* ppwzProtected)
+/**
+ * @brief 使用 CredProtect API 加密密码字符串。
+ *
+ * @details
+ * 为了防止内存中存在明文密码，必须使用 DPAPI 级别的保护。
+ * 加密后的数据只有 LSASS 进程（作为本地系统环境）能解密。
+ *
+ * @param[in]  pwzToProtect  明文密码。
+ * @param[out] ppwzProtected 加密后的结果副本。
+ */
+static HRESULT _ProtectAndCopyString(__in PCWSTR pwzToProtect, __deref_out PWSTR* ppwzProtected)
 {
     *ppwzProtected = NULL;
 
-    // pwzToProtect is const, but CredProtect takes a non-const string.
-    // So, ake a copy that we know isn't const.
-    PWSTR   pwzToProtectCopy;
+    PWSTR pwzToProtectCopy;
+    // SHStrDupW 必须先生成一个非 const 的缓冲区，因为 CredProtect
+    // 可能在原位置操作或计算
     HRESULT hr = SHStrDupW(pwzToProtect, &pwzToProtectCopy);
-    if ( SUCCEEDED(hr) )
+    if (SUCCEEDED(hr))
     {
-        // The first call to CredProtect determines the length of the encrypted
-        // string. Because we pass a NULL output buffer, we expect the call to
-        // fail.
-        //
-        // Note that the third parameter to CredProtect, the number of
-        // characters of pwzToProtectCopy to encrypt, must include the NULL
-        // terminator!
         DWORD cchProtected = 0;
-        if ( !CredProtectW(FALSE,
-                           pwzToProtectCopy,
-                           (DWORD)wcslen(pwzToProtectCopy) + 1,
-                           NULL,
-                           &cchProtected,
-                           NULL) )
+        // 1. 第一次调用：查询加密后所需的缓冲区大小。传 NULL 触发错误获取大小。
+        if (!CredProtectW(FALSE,
+                          pwzToProtectCopy,
+                          (DWORD)wcslen(pwzToProtectCopy) + 1,
+                          NULL,
+                          &cchProtected,
+                          NULL))
         {
             DWORD dwErr = GetLastError();
 
-            if ( (ERROR_INSUFFICIENT_BUFFER == dwErr) && (0 < cchProtected) )
+            if ((ERROR_INSUFFICIENT_BUFFER == dwErr) && (0 < cchProtected))
             {
-                // Allocate a buffer long enough for the encrypted string.
-                PWSTR pwzProtected =
-                    (PWSTR)CoTaskMemAlloc(cchProtected * sizeof(WCHAR));
-                if ( pwzProtected )
+                // 2. 分配加密后的内存
+                PWSTR pwzProtected = (PWSTR)CoTaskMemAlloc(cchProtected * sizeof(WCHAR));
+                if (pwzProtected)
                 {
-                    // The second call to CredProtect actually encrypts the
-                    // string.
-                    if ( CredProtectW(FALSE,
-                                      pwzToProtectCopy,
-                                      (DWORD)wcslen(pwzToProtectCopy) + 1,
-                                      pwzProtected,
-                                      &cchProtected,
-                                      NULL) )
+                    // 3. 第二次调用：执行真正的加密操作
+                    if (CredProtectW(FALSE,
+                                     pwzToProtectCopy,
+                                     (DWORD)wcslen(pwzToProtectCopy) + 1,
+                                     pwzProtected,
+                                     &cchProtected,
+                                     NULL))
                     {
                         *ppwzProtected = pwzProtected;
                         hr             = S_OK;
@@ -439,9 +423,7 @@ static HRESULT _ProtectAndCopyString(__in PCWSTR        pwzToProtect,
                     else
                     {
                         CoTaskMemFree(pwzProtected);
-
-                        dwErr = GetLastError();
-                        hr    = HRESULT_FROM_WIN32(dwErr);
+                        hr = HRESULT_FROM_WIN32(GetLastError());
                     }
                 }
                 else
@@ -454,62 +436,54 @@ static HRESULT _ProtectAndCopyString(__in PCWSTR        pwzToProtect,
                 hr = HRESULT_FROM_WIN32(dwErr);
             }
         }
-
         CoTaskMemFree(pwzToProtectCopy);
     }
 
     return hr;
 }
 
-//
-// If pwzPassword should be encrypted, return a copy encrypted with CredProtect.
-//
-// If not, just return a copy.
-//
-HRESULT ProtectIfNecessaryAndCopyPassword(
-    __in PCWSTR pwzPassword, __in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
-    __deref_out PWSTR* ppwzProtectedPassword)
+/**
+ * @brief 决定是否需要对密码进行加密并生成拷贝。
+ *
+ * @details
+ * - CPUS_CREDUI（应用提权弹窗）场景不加密，因为调用者可能不理解加密。
+ * - 登录/解锁场景如果密码尚未加密，则必须加密。
+ */
+HRESULT
+ProtectIfNecessaryAndCopyPassword(__in PCWSTR                             pwzPassword,
+                                  __in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
+                                  __deref_out PWSTR*                      ppwzProtectedPassword)
 {
     *ppwzProtectedPassword = NULL;
-
     HRESULT hr;
 
-    // ProtectAndCopyString is intended for non-empty strings only.  Empty
-    // passwords do not need to be encrypted.
-    if ( pwzPassword && *pwzPassword )
+    if (pwzPassword && *pwzPassword)
     {
-        // pwzPassword is const, but CredIsProtected takes a non-const string.
-        // So, ake a copy that we know isn't const.
         PWSTR pwzPasswordCopy;
         hr = SHStrDupW(pwzPassword, &pwzPasswordCopy);
-        if ( SUCCEEDED(hr) )
+        if (SUCCEEDED(hr))
         {
             bool                 bCredAlreadyEncrypted = false;
             CRED_PROTECTION_TYPE protectionType;
 
-            // If the password is already encrypted, we should not encrypt it
-            // again. An encrypted password may be received through
-            // SetSerialization in the CPUS_LOGON scenario during a Terminal
-            // Services connection, for instance.
-            if ( CredIsProtectedW(pwzPasswordCopy, &protectionType) )
+            // 1. 检查密码是否已经是加密状态（可能来自 RDP 或之前的序列化）
+            if (CredIsProtectedW(pwzPasswordCopy, &protectionType))
             {
-                if ( CredUnprotected != protectionType )
+                if (CredUnprotected != protectionType)
                 {
                     bCredAlreadyEncrypted = true;
                 }
             }
 
-            // Passwords should not be encrypted in the CPUS_CREDUI scenario. We
-            // cannot know if our caller expects or can handle an encryped
-            // password.
-            if ( CPUS_CREDUI == cpus || bCredAlreadyEncrypted )
+            // 2. 逻辑判断：CredUI 或者 已经加密过，就不再重复加密
+            if (CPUS_CREDUI == cpus || bCredAlreadyEncrypted)
             {
                 hr = SHStrDupW(pwzPasswordCopy, ppwzProtectedPassword);
             }
             else
             {
-                hr = _ProtectAndCopyString(pwzPasswordCopy,
-                                           ppwzProtectedPassword);
+                // 否则进行 DPAPI 加密
+                hr = _ProtectAndCopyString(pwzPasswordCopy, ppwzProtectedPassword);
             }
 
             CoTaskMemFree(pwzPasswordCopy);
@@ -517,65 +491,60 @@ HRESULT ProtectIfNecessaryAndCopyPassword(
     }
     else
     {
+        // 空密码直接拷贝
         hr = SHStrDupW(L"", ppwzProtectedPassword);
     }
 
     return hr;
 }
 
-//
-// Unpack a KERB_INTERACTIVE_UNLOCK_LOGON *in place*.  That is, reset the
-// Buffers from being offsets to being real pointers.  This means, of course,
-// that passing the resultant struct across any sort of memory space boundary is
-// not going to work -- repack it if necessary!
-//
-void KerbInteractiveUnlockLogonUnpackInPlace(
-    __inout_bcount(cb) KERB_INTERACTIVE_UNLOCK_LOGON* pkiul, __in DWORD cb)
+/**
+ * @brief 原位解包：将二进制块中的“偏移量”重新转换回“真实地址指针”。
+ *
+ * @details
+ * 仅用于本地解析已经序列化的缓冲区。注意这会使该结构体无法再次跨进程发送。
+ */
+void KerbInteractiveUnlockLogonUnpackInPlace(__inout_bcount(cb)
+                                                 KERB_INTERACTIVE_UNLOCK_LOGON* pkiul,
+                                             __in DWORD                         cb)
 {
-    if ( sizeof(*pkiul) <= cb )
+    if (sizeof(*pkiul) <= cb)
     {
         KERB_INTERACTIVE_LOGON* pkil = &pkiul->Logon;
 
-        // Sanity check: if the range described by each (Buffer + MaximumSize)
-        // falls within the total bytecount, we can be pretty confident that the
-        // Buffers are actually offsets and that this is a packed credential.
-        if ( ((ULONG_PTR)pkil->LogonDomainName.Buffer +
-                  pkil->LogonDomainName.MaximumLength <=
-              cb) &&
-             ((ULONG_PTR)pkil->UserName.Buffer + pkil->UserName.MaximumLength <=
-              cb) &&
-             ((ULONG_PTR)pkil->Password.Buffer + pkil->Password.MaximumLength <=
-              cb) )
+        // 安全检查：防止恶意的缓冲区溢出攻击（检查偏移量是否超出总长度）
+        if (((ULONG_PTR)pkil->LogonDomainName.Buffer + pkil->LogonDomainName.MaximumLength <= cb) &&
+            ((ULONG_PTR)pkil->UserName.Buffer + pkil->UserName.MaximumLength <= cb) &&
+            ((ULONG_PTR)pkil->Password.Buffer + pkil->Password.MaximumLength <= cb))
         {
+
+            // 指针 = 结构体基地址 + 缓冲区中存储的偏移量
             pkil->LogonDomainName.Buffer =
                 pkil->LogonDomainName.Buffer
-                    ? (PWSTR)((BYTE*)pkiul +
-                              (ULONG_PTR)pkil->LogonDomainName.Buffer)
+                    ? (PWSTR)((BYTE*)pkiul + (ULONG_PTR)pkil->LogonDomainName.Buffer)
                     : NULL;
 
-            pkil->UserName.Buffer =
-                pkil->UserName.Buffer
-                    ? (PWSTR)((BYTE*)pkiul + (ULONG_PTR)pkil->UserName.Buffer)
-                    : NULL;
+            pkil->UserName.Buffer = pkil->UserName.Buffer
+                                        ? (PWSTR)((BYTE*)pkiul + (ULONG_PTR)pkil->UserName.Buffer)
+                                        : NULL;
 
-            pkil->Password.Buffer =
-                pkil->Password.Buffer
-                    ? (PWSTR)((BYTE*)pkiul + (ULONG_PTR)pkil->Password.Buffer)
-                    : NULL;
+            pkil->Password.Buffer = pkil->Password.Buffer
+                                        ? (PWSTR)((BYTE*)pkiul + (ULONG_PTR)pkil->Password.Buffer)
+                                        : NULL;
         }
     }
 }
 
-//
-// Use the CredPackAuthenticationBuffer and CredUnpackAuthenticationBuffer to
-// convert a 32 bit WOW cred blob into a 64 bit native blob by unpacking it and
-// immediately repacking it.
-//
-HRESULT KerbInteractiveUnlockLogonRepackNative(__in_bcount(cbWow) BYTE* rgbWow,
-                                               __in DWORD               cbWow,
-                                               __deref_out_bcount(*pcbNative)
-                                                   BYTE**   prgbNative,
-                                               __out DWORD* pcbNative)
+/**
+ * @brief WOW64 兼容性处理。将 32 位凭据重新打包为 64 位。
+ *
+ * @details 当 32 位进程试图在 64
+ * 位系统上通过凭据提供程序登录时，数据结构对齐会出错。 此函数利用系统提供的
+ * CredPack/Unpack API 来抹除架构差异。
+ */
+HRESULT KerbInteractiveUnlockLogonRepackNative(__in_bcount(cbWow) BYTE* rgbWow, __in DWORD cbWow,
+                                               __deref_out_bcount(*pcbNative) BYTE** prgbNative,
+                                               __out DWORD*                          pcbNative)
 {
     HRESULT hr                = E_OUTOFMEMORY;
     PWSTR   pszDomainUsername = NULL;
@@ -586,7 +555,7 @@ HRESULT KerbInteractiveUnlockLogonRepackNative(__in_bcount(cbWow) BYTE* rgbWow,
     *prgbNative = NULL;
     *pcbNative  = 0;
 
-    // Unpack the 32 bit KERB structure
+    // 1. 解包 32 位（WOW）结构体，获取明文数据
     CredUnPackAuthenticationBufferW(CRED_PACK_WOW_BUFFER,
                                     rgbWow,
                                     cbWow,
@@ -596,24 +565,23 @@ HRESULT KerbInteractiveUnlockLogonRepackNative(__in_bcount(cbWow) BYTE* rgbWow,
                                     NULL,
                                     pszPassword,
                                     &cchPassword);
-    if ( ERROR_INSUFFICIENT_BUFFER == GetLastError() )
+    if (ERROR_INSUFFICIENT_BUFFER == GetLastError())
     {
-        pszDomainUsername =
-            (PWSTR)LocalAlloc(0, cchDomainUsername * sizeof(WCHAR));
-        if ( pszDomainUsername )
+        pszDomainUsername = (PWSTR)LocalAlloc(0, cchDomainUsername * sizeof(WCHAR));
+        if (pszDomainUsername)
         {
             pszPassword = (PWSTR)LocalAlloc(0, cchPassword * sizeof(WCHAR));
-            if ( pszPassword )
+            if (pszPassword)
             {
-                if ( CredUnPackAuthenticationBufferW(CRED_PACK_WOW_BUFFER,
-                                                     rgbWow,
-                                                     cbWow,
-                                                     pszDomainUsername,
-                                                     &cchDomainUsername,
-                                                     NULL,
-                                                     NULL,
-                                                     pszPassword,
-                                                     &cchPassword) )
+                if (CredUnPackAuthenticationBufferW(CRED_PACK_WOW_BUFFER,
+                                                    rgbWow,
+                                                    cbWow,
+                                                    pszDomainUsername,
+                                                    &cchDomainUsername,
+                                                    NULL,
+                                                    NULL,
+                                                    pszPassword,
+                                                    &cchPassword))
                 {
                     hr = S_OK;
                 }
@@ -625,22 +593,18 @@ HRESULT KerbInteractiveUnlockLogonRepackNative(__in_bcount(cbWow) BYTE* rgbWow,
         }
     }
 
-    // Repack native
-    if ( SUCCEEDED(hr) )
+    // 2. 将明文数据以“原生（Native）”即 64 位格式重新打包
+    if (SUCCEEDED(hr))
     {
         hr = E_OUTOFMEMORY;
-        CredPackAuthenticationBufferW(
-            0, pszDomainUsername, pszPassword, *prgbNative, pcbNative);
-        if ( ERROR_INSUFFICIENT_BUFFER == GetLastError() )
+        CredPackAuthenticationBufferW(0, pszDomainUsername, pszPassword, *prgbNative, pcbNative);
+        if (ERROR_INSUFFICIENT_BUFFER == GetLastError())
         {
             *prgbNative = (BYTE*)LocalAlloc(LMEM_ZEROINIT, *pcbNative);
-            if ( *prgbNative )
+            if (*prgbNative)
             {
-                if ( CredPackAuthenticationBufferW(0,
-                                                   pszDomainUsername,
-                                                   pszPassword,
-                                                   *prgbNative,
-                                                   pcbNative) )
+                if (CredPackAuthenticationBufferW(
+                        0, pszDomainUsername, pszPassword, *prgbNative, pcbNative))
                 {
                     hr = S_OK;
                 }
@@ -652,33 +616,42 @@ HRESULT KerbInteractiveUnlockLogonRepackNative(__in_bcount(cbWow) BYTE* rgbWow,
         }
     }
 
+    // 3. 安全清理：解包过程中产生的临时密码必须从内存抹除
     LocalFree(pszDomainUsername);
-    if ( pszPassword )
+    if (pszPassword)
     {
-        SecureZeroMemory(pszPassword, cchPassword * sizeof(WCHAR));
+        SecureZeroMemory(pszPassword, cchPassword * sizeof(WCHAR));  // 抹除敏感信息
         LocalFree(pszPassword);
     }
     return hr;
 }
 
-// Concatonates pwszDomain and pwszUsername and places the result in
-// *ppwszDomainUsername.
-HRESULT DomainUsernameStringAlloc(__in PCWSTR        pwszDomain,
-                                  __in PCWSTR        pwszUsername,
+/**
+ * @brief 拼接域名和用户名，生成 "DOMAIN\Username" 格式。
+ *
+ * @param[in]  pwszDomain   域名。
+ * @param[in]  pwszUsername 用户名。
+ * @param[out] ppwszDomainUsername 分配并返回拼接后的字符串。
+ *
+ * @return HRESULT。
+ */
+HRESULT DomainUsernameStringAlloc(__in PCWSTR pwszDomain, __in PCWSTR pwszUsername,
                                   __deref_out PWSTR* ppwszDomainUsername)
 {
     HRESULT hr;
     size_t  cchDomain   = lstrlenW(pwszDomain);
     size_t  cchUsername = lstrlenW(pwszUsername);
-    // Length of domain, 1 character for '\', length of Username, plus null
-    // terminator.
-    size_t cbLen    = sizeof(WCHAR) * (cchDomain + 1 + cchUsername + 1);
-    PWSTR  pwszDest = (PWSTR)HeapAlloc(GetProcessHeap(), 0, cbLen);
-    if ( pwszDest )
+
+    // 长度计算：域名 + 1('\') + 用户名 + 1(NULL)
+    size_t cbLen = sizeof(WCHAR) * (cchDomain + 1 + cchUsername + 1);
+
+    // 使用当前进程堆分配
+    PWSTR pwszDest = (PWSTR)HeapAlloc(GetProcessHeap(), 0, cbLen);
+    if (pwszDest)
     {
-        hr = StringCbPrintfW(
-            pwszDest, cbLen, L"%s\\%s", pwszDomain, pwszUsername);
-        if ( SUCCEEDED(hr) )
+        // 安全格式化，防止溢出
+        hr = StringCbPrintfW(pwszDest, cbLen, L"%s\\%s", pwszDomain, pwszUsername);
+        if (SUCCEEDED(hr))
         {
             *ppwszDomainUsername = pwszDest;
         }

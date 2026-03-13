@@ -1,11 +1,14 @@
-//
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
-//
-// Copyright (c) Microsoft Corporation. All rights reserved.
-//
+/**
+ * @file CSampleProvider.h
+ * @brief 凭据提供程序管理器类定义。
+ *
+ * @details CSampleProvider 实现了 ICredentialProvider 接口。
+ * 它是 Windows 登录 UI 加载 DLL 后创建的第一个对象。
+ * 它的主要任务是：
+ * 1. 响应系统的使用场景（登录、解锁、CredUI）。
+ * 2. 告诉系统 UI 界面上有多少个控件（字段描述符）。
+ * 3. 枚举并提供具体的凭据实例（磁贴）。
+ */
 
 #pragma once
 
@@ -13,19 +16,33 @@
 #include <windows.h>
 #include <strsafe.h>
 
-#include "CSampleCredential.h"
+#include "CSampleCredential.h"  // 具体磁贴实例的类定义
 #include "helpers.h"
 
+/**
+ * @class CSampleProvider
+ * @brief 示例凭据提供程序的主控类。
+ */
 class CSampleProvider : public ICredentialProvider
 {
   public:
-    // IUnknown
-    IFACEMETHODIMP_(ULONG) AddRef()
+    // --- IUnknown 接口实现 (COM 基础) ---
+    // 负责管理对象的生命周期和接口查询
+
+    /**
+     * @brief 增加引用计数。
+     * @return 增加后的计数。
+     */
+    IFACEMETHODIMP_(ULONG) AddRef() override
     {
         return ++_cRef;
     }
-    
-    IFACEMETHODIMP_(ULONG) Release()
+
+    /**
+     * @brief 减少引用计数。
+     * @details 当计数为 0 时，自我销毁。
+     */
+    IFACEMETHODIMP_(ULONG) Release() override
     {
         LONG cRef = --_cRef;
         if (!cRef)
@@ -35,49 +52,119 @@ class CSampleProvider : public ICredentialProvider
         return cRef;
     }
 
-    IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv)
+    /**
+     * @brief 接口查询。
+     * @details 系统通过此方法确认该对象是否支持 ICredentialProvider 接口。
+     */
+    IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override
     {
-        static const QITAB qit[] =
-        {
-            QITABENT(CSampleProvider, ICredentialProvider), // IID_ICredentialProvider
+        static const QITAB qit[] = {
+            QITABENT(CSampleProvider, ICredentialProvider),  // 暴露给系统的核心接口
             {0},
         };
         return QISearch(this, qit, riid, ppv);
     }
 
   public:
-    IFACEMETHODIMP SetUsageScenario(__in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus, __in DWORD dwFlags);
-    IFACEMETHODIMP SetSerialization(__in const CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION* pcpcs);
+    // --- ICredentialProvider 核心接口方法 ---
 
-    IFACEMETHODIMP Advise(__in ICredentialProviderEvents* pcpe, __in UINT_PTR upAdviseContext);
-    IFACEMETHODIMP UnAdvise();
+    /**
+     * @brief 设置使用场景。
+     * @param[in] cpus    当前场景（登录、解锁、CredUI）。
+     * @param[in] dwFlags 场景标志（如 CPUS_LOGON）。
+     * @details 这是第一个被调用的方法。提供程序根据场景决定是否显示自己。
+     */
+    IFACEMETHODIMP SetUsageScenario(__in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
+                                    __in DWORD                              dwFlags) override;
 
-    IFACEMETHODIMP GetFieldDescriptorCount(__out DWORD* pdwCount);
-    IFACEMETHODIMP GetFieldDescriptorAt(__in DWORD dwIndex,  __deref_out CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR** ppcpfd);
+    /**
+     * @brief 设置预填充数据。
+     * @param[in] pcpcs 包含序列化凭据数据的指针。
+     * @details 当系统从远程桌面（RDP）或其他地方收到凭据信息时，会调用此方法尝试自动填充 UI。
+     */
+    IFACEMETHODIMP SetSerialization(
+        __in const CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION* pcpcs) override;
 
-    IFACEMETHODIMP GetCredentialCount(__out DWORD* pdwCount,
-                                      __out_range(<,*pdwCount) DWORD* pdwDefault,
-                                      __out BOOL* pbAutoLogonWithDefault);
-    IFACEMETHODIMP GetCredentialAt(__in DWORD dwIndex, 
-                                   __deref_out ICredentialProviderCredential** ppcpc);
+    /**
+     * @brief 注册事件回调。
+     * @param[in] pcpe 事件处理接口。
+     * @param[in] upAdviseContext 上下文标识。
+     * @details 当提供程序需要通知系统“磁贴数量变了”或“UI 需要刷新”时，通过 pcpe 回调。
+     */
+    IFACEMETHODIMP Advise(__in ICredentialProviderEvents* pcpe,
+                          __in UINT_PTR                   upAdviseContext) override;
 
+    /**
+     * @brief 取消注册事件回调。
+     */
+    IFACEMETHODIMP UnAdvise() override;
+
+    /**
+     * @brief 获取 UI 字段描述符的总数。
+     * @param[out] pdwCount 接收字段数量。
+     * @details 告诉系统：我的登录界面上有多少个控件（文本框、按钮、下拉框等）。
+     */
+    IFACEMETHODIMP GetFieldDescriptorCount(__out DWORD* pdwCount) override;
+
+    /**
+     * @brief 获取指定索引的字段描述符。
+     * @param[in]  dwIndex 字段索引。
+     * @param[out] ppcpfd  接收字段描述符结构体（包含控件类型、ID等）。
+     */
+    IFACEMETHODIMP GetFieldDescriptorAt(
+        __in DWORD dwIndex, __deref_out CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR** ppcpfd) override;
+
+    /**
+     * @brief 获取磁贴（Credential Tiles）的数量。
+     * @param[out] pdwCount 磁贴总数。
+     * @param[out] pdwDefault 默认选中的磁贴索引。
+     * @param[out] pbAutoLogonWithDefault 是否使用默认磁贴尝试自动登录。
+     */
+    IFACEMETHODIMP GetCredentialCount(__out DWORD*                     pdwCount,
+                                      __out_range(<, *pdwCount) DWORD* pdwDefault,
+                                      __out BOOL* pbAutoLogonWithDefault) override;
+
+    /**
+     * @brief 获取具体的凭据实例（磁贴）。
+     * @param[in]  dwIndex 磁贴索引。
+     * @param[out] ppcpc   接收 ICredentialProviderCredential 接口指针。
+     * @details 真正的 UI 交互和身份验证逻辑都封装在返回的 ppcpc 对象中。
+     */
+    IFACEMETHODIMP GetCredentialAt(__in DWORD                                  dwIndex,
+                                   __deref_out ICredentialProviderCredential** ppcpc) override;
+
+    /** @brief 友元函数，用于类工厂创建实例 */
     friend HRESULT CSample_CreateInstance(__in REFIID riid, __deref_out void** ppv);
 
   protected:
     CSampleProvider();
     __override ~CSampleProvider();
-    
-  private:
-      void _CleanUpAllCredentials();
-    
-private:
-    LONG                _cRef;
-    CSampleCredential   **_rgpCredentials;          // Pointers to the credentials which will be enumerated by this 
-                                                    // Provider.
 
-    ICredentialProvider *_pWrappedProvider;         // Our wrapped provider.
-    DWORD               _dwCredentialCount;         // The number of credentials provided by our wrapped provider.
-    DWORD               _dwWrappedDescriptorCount;  // The number of fields on each tile of our wrapped provider's 
-                                                    // credentials.
-    bool                _bEnumeratedSetSerialization;
+  private:
+    /** @brief 清理所有已创建的凭据实例。 */
+    void _CleanUpAllCredentials();
+
+  private:
+    LONG _cRef;  ///< COM 引用计数。
+
+    /**
+     * @brief 凭据对象指针数组。
+     * @details 这里存放的是这个 Provider 枚举出的所有磁贴实例。
+     */
+    CSampleCredential** _rgpCredentials;
+
+    /**
+     * @brief 被包装的原始提供程序。
+     * @details 这是一个 Wrapper 模式的体现。我们将标准的密码提供程序封装在内。
+     */
+    ICredentialProvider* _pWrappedProvider;
+
+    /** @brief 被包装提供程序提供的凭据数量。 */
+    DWORD _dwCredentialCount;
+
+    /** @brief 被包装提供程序的字段描述符数量。 */
+    DWORD _dwWrappedDescriptorCount;
+
+    /** @brief 标识是否已经处理了 SetSerialization 调用。 */
+    bool _bEnumeratedSetSerialization;
 };

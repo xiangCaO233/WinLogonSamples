@@ -1,10 +1,8 @@
-//
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
-//
-// Copyright (c) Microsoft Corporation. All rights reserved.
-//
+/**
+ * @file Resource.h
+ * @brief 资源符号定义。
+ * @details 给二进制资源（如图片）分配一个整数 ID，以便在 C++ 代码中引用。
+ */
 
-#define IDB_TILE_IMAGE     101
+// 101 是资源的唯一编号
+#define IDB_TILE_IMAGE 101

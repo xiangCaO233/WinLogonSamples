@@ -1,6 +1,16 @@
+/**
+ * @file resources.rc
+ * @brief 资源脚本文件。
+ * @details 此文件告诉资源编译器（RC.exe）将哪些物理文件打包进 DLL 内部。
+ */
+
 #include "Resource.h"
 
-// Bitmaps:
+// 定义一个位图资源
+// IDB_TILE_IMAGE: 刚才定义的 ID 101
+// BITMAP: 资源类型是位图
+// DISCARDABLE: 内存管理标志，表示在内存不足时系统可以暂时丢弃此资源
+// "tileimage.bmp": 磁盘上的实际文件名。它会出现在磁贴的左上角作为图标。
 IDB_TILE_IMAGE      BITMAP      DISCARDABLE "tileimage.bmp" 
-END
 
+/** @brief 资源文件结束 */
