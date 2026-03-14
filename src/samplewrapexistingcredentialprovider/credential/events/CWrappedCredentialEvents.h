@@ -17,7 +17,7 @@
 #include <strsafe.h>
 #include <shlguid.h>
 #include "helpers.h"
-#include "dll.h"
+#include "Dll.h"
 #include "resource.h"
 
 class CWrappedCredentialEvents : public ICredentialProviderCredentialEvents

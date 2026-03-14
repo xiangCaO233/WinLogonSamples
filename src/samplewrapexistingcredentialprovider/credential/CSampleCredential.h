@@ -13,8 +13,9 @@
 #pragma once
 
 #include <helpers.h>
+#include <vector>
 #include "common.h"
-#include "dll.h"
+#include "Dll.h"
 #include "resource.h"
 #include "events/CWrappedCredentialEvents.h"  // 用于包装事件回调的转换器
 
@@ -164,6 +165,23 @@ class CSampleCredential : public ICredentialProviderCredential
 
   private:
     LONG _cRef;  ///< 引用计数。
+
+    /** @brief 自定义字段信息 */
+    struct FieldInfo
+    {
+        ///< 字段id
+        DWORD field_id;
+        ///< 字段类型
+        CREDENTIAL_PROVIDER_FIELD_TYPE field_type;
+        ///< 字段显示标签
+        LPWSTR field_label;
+        ///< 显示状态（隐藏、选中时显示、始终显示等）
+        CREDENTIAL_PROVIDER_FIELD_STATE field_state;
+        ///< 交互状态（无、获取焦点等）
+        CREDENTIAL_PROVIDER_FIELD_INTERACTIVE_STATE
+        field_interactive_state;
+    };
+    std::vector<FieldInfo> m_custom_fields{SFI_NUM_FIELDS};
 
     /** @brief 存储自定义字段的描述信息（如下拉框类型）。 */
     CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR _rgCredProvFieldDescriptors[SFI_NUM_FIELDS];

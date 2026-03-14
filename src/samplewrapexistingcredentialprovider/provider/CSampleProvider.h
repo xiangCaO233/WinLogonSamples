@@ -18,6 +18,10 @@
 
 #include "../credential/CSampleCredential.h"  // 具体磁贴实例的类定义
 #include "helpers.h"
+// Windows 现代 COM 智能指针
+#include <wrl/client.h>
+
+using Microsoft::WRL::ComPtr;
 
 /**
  * @class CSampleProvider
@@ -146,6 +150,9 @@ class CSampleProvider : public ICredentialProvider
 
   private:
     LONG _cRef;  ///< COM 引用计数。
+
+    // 使用 vector 管理磁贴实例
+    std::vector<ComPtr<CSampleCredential>> m_sample_credentials;
 
     /**
      * @brief 凭据对象指针数组。
