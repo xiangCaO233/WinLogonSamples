@@ -8,10 +8,10 @@ HRESULT CSampleProvider::SetSerialization(
 {
     HRESULT hr = E_UNEXPECTED;
 
-    if (_pWrappedProvider != NULL)
+    if (m_wrappedProvider != NULL)
     {
         // 直接转发，让内置程序去处理预填充的用户名或密码
-        hr = _pWrappedProvider->SetSerialization(pcpcs);
+        hr = m_wrappedProvider->SetSerialization(pcpcs);
     }
 
     return hr;

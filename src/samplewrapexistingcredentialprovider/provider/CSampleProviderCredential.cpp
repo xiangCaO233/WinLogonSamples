@@ -21,13 +21,10 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
     DWORD   dwDefault             = 0;
     BOOL    bAutoLogonWithDefault = FALSE;
 
-    if (_pWrappedProvider != NULL)
+    if (m_wrappedProvider != NULL)
     {
         // 1. 如果之前已经分配过磁贴数组，先清理旧的。
-        if (_rgpCredentials != NULL)
-        {
-            _CleanUpAllCredentials();
-        }
+        CleanUpAllCredentials();
 
         DWORD count;
         // 获取字段总数以确保后续初始化正确
@@ -36,79 +33,65 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
         if (SUCCEEDED(hr))
         {
             // 2. 核心：获取内置提供程序的磁贴数量（例如：找到了 3 个用户）
-            hr = _pWrappedProvider->GetCredentialCount(
-                &(_dwCredentialCount), &(dwDefault), &(bAutoLogonWithDefault));
+            hr = m_wrappedProvider->GetCredentialCount(
+                &(m_wrappedCredentialCount), &(dwDefault), &(bAutoLogonWithDefault));
 
             if (SUCCEEDED(hr))
             {
-                // 3. 为我们的包装类分配指针数组
-                _rgpCredentials = new CSampleCredential*[_dwCredentialCount];
-                if (_rgpCredentials != NULL)
+                // 3. 预先分配 vector 空间
+                m_sample_credentials.reserve(m_wrappedCredentialCount);
+                // 4. 循环为每个内置用户创建一个包装磁贴
+                for (DWORD lcv = 0; SUCCEEDED(hr) && (lcv < m_wrappedCredentialCount); lcv++)
                 {
-                    // 4. 循环为每个内置用户创建一个包装磁贴
-                    for (DWORD lcv = 0; SUCCEEDED(hr) && (lcv < _dwCredentialCount); lcv++)
+                    ComPtr<CSampleCredential> pSampleCred;
+                    // 注意：由于 CSampleCredential 构造函数将 _cRef 初始化为 1，
+                    // 这里我们使用 Attach() 来接管这唯一的引用计数，防止内存泄漏。
+                    pSampleCred.Attach(new (std::nothrow) CSampleCredential());
+
+                    if (pSampleCred != nullptr)
                     {
-                        _rgpCredentials[lcv] = new CSampleCredential();
-                        if (_rgpCredentials[lcv] != NULL)
+                        // 5. 获取内置程序的第 lcv 个具体磁贴对象
+                        ICredentialProviderCredential* pCredential = nullptr;
+                        hr = m_wrappedProvider->GetCredentialAt(lcv, &(pCredential));
+
+                        if (SUCCEEDED(hr))
                         {
-                            // 5. 获取内置程序的第 lcv 个具体磁贴对象
-                            ICredentialProviderCredential* pCredential;
-                            hr = _pWrappedProvider->GetCredentialAt(lcv, &(pCredential));
+                            // 6. 初始化包装类：
+                            // 将内置磁贴指针 (pCredential) 传进去，并传入自定义的字段描述符和状态。
+                            hr = pSampleCred->Initialize(s_rgCredProvFieldDescriptors,
+                                                         s_rgFieldStatePairs,
+                                                         pCredential,
+                                                         m_wrappedDescriptorCount);
 
                             if (SUCCEEDED(hr))
                             {
-                                // 6. 初始化包装类：
-                                // 将内置磁贴指针 (pCredential) 传进去，
-                                // 并传入自定义的字段描述符和状态。
-                                hr = _rgpCredentials[lcv]->Initialize(s_rgCredProvFieldDescriptors,
-                                                                      s_rgFieldStatePairs,
-                                                                      pCredential,
-                                                                      _dwWrappedDescriptorCount);
-
-                                // 失败清理逻辑
-                                if (FAILED(hr))
-                                {
-                                    for (lcv = 0; lcv < _dwCredentialCount; lcv++)
-                                    {
-                                        if (_rgpCredentials[lcv] != NULL)
-                                        {
-                                            _rgpCredentials[lcv]->Release();
-                                            _rgpCredentials[lcv] = NULL;
-                                        }
-                                    }
-                                }
-                                pCredential->Release();  // 释放本地引用的指针
+                                m_sample_credentials.push_back(std::move(pSampleCred));
                             }
-                        }
-                        else
-                        {
-                            hr = E_OUTOFMEMORY;
+
+                            pCredential->Release();  // 释放本地引用的指针
                         }
                     }
+                    else
+                    {
+                        hr = E_OUTOFMEMORY;
+                    }
                 }
-                else
+                // 如果任何一步失败了，清空创建的内容
+                if (FAILED(hr))
                 {
-                    hr = E_OUTOFMEMORY;
+                    CleanUpAllCredentials();
                 }
             }
         }
-    }
 
-    // 最终赋值输出参数
-    if (FAILED(hr))
-    {
-        if (_rgpCredentials != NULL)
+        // 最终赋值输出参数
+        if (SUCCEEDED(hr))
         {
-            delete _rgpCredentials;
-            _rgpCredentials = NULL;
+            *pdwCount               = m_wrappedCredentialCount;
+            *pdwDefault             = dwDefault;
+            *pbAutoLogonWithDefault = bAutoLogonWithDefault;
+            WriteLog(L"内置提供程序返回磁贴总数: " + std::to_wstring(m_wrappedCredentialCount));
         }
-    }
-    else
-    {
-        *pdwCount               = _dwCredentialCount;
-        *pdwDefault             = dwDefault;
-        *pbAutoLogonWithDefault = bAutoLogonWithDefault;
-        WriteLog(L"内置提供程序返回磁贴总数: " + std::to_wstring(_dwCredentialCount));
     }
 
     return hr;
@@ -121,34 +104,18 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
 HRESULT CSampleProvider::GetCredentialAt(__in DWORD                           dwIndex,
                                          __in ICredentialProviderCredential** ppcpc)
 {
-    // // 1. 参数校验
-    // if (ppcpc == nullptr)
-    //     return E_POINTER;
-    // *ppcpc = nullptr;
+    // 1. 参数校验
+    if (ppcpc == nullptr)
+        return E_POINTER;
+    *ppcpc = nullptr;
 
-    // if (dwIndex >= m_sample_credentials.size())
-    // {
-    //     return E_INVALIDARG;
-    // }
-
-    // // 2. 从 vector 中取出 ComPtr 并复制给返回指针
-    // // CopyTo 内部会自动调用 AddRef()，这是 COM 函数返回指针的标准要求
-    // return m_sample_credentials[dwIndex].CopyTo(ppcpc);
-
-    HRESULT hr;
-
-    // 参数校验：索引必须在范围内，数组不能为空
-    if ((dwIndex < _dwCredentialCount) && (ppcpc != NULL) && (_rgpCredentials != NULL) &&
-        (_rgpCredentials[dwIndex] != NULL))
+    if (dwIndex >= m_sample_credentials.size())
     {
-        // 返回我们包装后的磁贴实例的接口指针
-        hr = _rgpCredentials[dwIndex]->QueryInterface(IID_ICredentialProviderCredential,
-                                                      reinterpret_cast<void**>(ppcpc));
-    }
-    else
-    {
-        hr = E_INVALIDARG;
+        return E_INVALIDARG;
     }
 
-    return hr;
+    // 2. 从 vector 中取出 ComPtr 并复制给返回指针
+    // CopyTo 内部会自动调用 AddRef()，并且要求转换为指定接口，这是 COM 函数返回指针的标准要求
+    return m_sample_credentials[dwIndex].CopyTo(IID_ICredentialProviderCredential,
+                                                reinterpret_cast<void**>(ppcpc));
 }

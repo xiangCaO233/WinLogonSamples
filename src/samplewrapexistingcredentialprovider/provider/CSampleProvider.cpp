@@ -19,14 +19,11 @@
  */
 CSampleProvider::CSampleProvider()
     : _cRef(1)
+    , m_wrappedCredentialCount(0)
+    , m_wrappedProvider(nullptr)
+    , m_wrappedDescriptorCount(0)
 {
     DllAddRef();  // 增加 DLL 引用计数
-
-    _rgpCredentials    = NULL;  // 凭据实例数组指针
-    _dwCredentialCount = 0;     // 磁贴数量
-
-    _pWrappedProvider         = NULL;  // 指向内置密码提供程序的指针
-    _dwWrappedDescriptorCount = 0;     // 内置提供程序的 UI 字段总数
 }
 
 /**
@@ -35,11 +32,11 @@ CSampleProvider::CSampleProvider()
  */
 CSampleProvider::~CSampleProvider()
 {
-    _CleanUpAllCredentials();  // 清理所有的磁贴实例
+    CleanUpAllCredentials();  // 清理所有的磁贴实例
 
-    if (_pWrappedProvider)
+    if (m_wrappedProvider)
     {
-        _pWrappedProvider->Release();  // 释放内置提供程序
+        m_wrappedProvider->Release();  // 释放内置提供程序
     }
 
     DllRelease();  // 减少 DLL 引用计数
@@ -49,23 +46,9 @@ CSampleProvider::~CSampleProvider()
  * @brief 清理所有凭据实例。
  * @details 遍历指针数组，释放每一个 ICredentialProviderCredential 对象。
  */
-void CSampleProvider::_CleanUpAllCredentials()
+void CSampleProvider::CleanUpAllCredentials()
 {
     m_sample_credentials.clear();
-
-    if (_rgpCredentials != NULL)
-    {
-        for (DWORD lcv = 0; lcv < _dwCredentialCount; lcv++)
-        {
-            if (_rgpCredentials[lcv] != NULL)
-            {
-                _rgpCredentials[lcv]->Release();  // 调用磁贴对象的 Release
-                _rgpCredentials[lcv] = NULL;
-            }
-        }
-        delete[] _rgpCredentials;  // 释放指针数组本身
-        _rgpCredentials = NULL;
-    }
 }
 
 /**

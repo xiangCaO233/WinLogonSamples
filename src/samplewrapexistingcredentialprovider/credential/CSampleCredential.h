@@ -12,13 +12,11 @@
 
 #pragma once
 
-#include <array>
 #include <helpers.h>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
 #include "common.h"
-#include "Dll.h"
 #include "resource.h"
 #include "events/CWrappedCredentialEvents.h"  // 用于包装事件回调的转换器
 
@@ -45,10 +43,10 @@ class CSampleCredential : public ICredentialProviderCredential2
     IFACEMETHODIMP GetUserSid(__deref_out PWSTR* ppwszUserSid) override
     {
         *ppwszUserSid = nullptr;
-        if (_pWrappedCredential)
+        if (m_wrappedCredential)
         {
             ICredentialProviderCredential2* pV2 = nullptr;
-            HRESULT hr = _pWrappedCredential->QueryInterface(IID_PPV_ARGS(&pV2));
+            HRESULT hr = m_wrappedCredential->QueryInterface(IID_PPV_ARGS(&pV2));
             if (SUCCEEDED(hr) && pV2)
             {  // 必须判断 pV2
                 hr = pV2->GetUserSid(ppwszUserSid);
@@ -225,21 +223,20 @@ class CSampleCredential : public ICredentialProviderCredential2
      * @details 这是一个关键设计。内置磁贴（Wrapped）会触发它自己的事件。
      * 我们需要拦截这些事件，通过这个对象转发给外层的 LogonUI，并修正 FieldID 偏移。
      */
-    CWrappedCredentialEvents* _pWrappedCredentialEvents;
+    CWrappedCredentialEvents* m_wrappedCredentialEvents;
 
     /** @brief 指向 LogonUI 提供的事件处理接口。 */
-    ICredentialProviderCredentialEvents* _pCredProvCredentialEvents;
+    ICredentialProviderCredentialEvents* m_CredentialProviderCredentialEvents;
 
     /** @brief 指向被包装的原始内置凭据磁贴（例如系统标准的密码磁贴）。 */
-    ICredentialProviderCredential* _pWrappedCredential;
+    ICredentialProviderCredential* m_wrappedCredential;
 
     /** @brief 内置磁贴占用的字段数。我们自定义字段的 ID 会在此基础上累加。 */
-    DWORD _dwWrappedDescriptorCount;
+    DWORD m_wrappedDescriptorCount;
 
     /** @brief 存储用户在下拉列表中选择的索引（如选择“Operations”）。 */
-    DWORD _dwDatabaseIndex;
+    DWORD m_selectedDatabaseIndex;
 
     /** @brief 用户输入的密码 */
     std::wstring m_user_entered_authcode;
-    PWSTR        _pszUserEnteredAuthCode;
 };

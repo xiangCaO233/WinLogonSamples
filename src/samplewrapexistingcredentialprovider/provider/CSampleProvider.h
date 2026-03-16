@@ -60,11 +60,11 @@ class CSampleProvider : public ICredentialProvider, public ICredentialProviderSe
     IFACEMETHODIMP SetUserArray(__in ICredentialProviderUserArray* users) override
     {
         HRESULT hr = E_NOTIMPL;
-        if (_pWrappedProvider != NULL)
+        if (m_wrappedProvider != NULL)
         {
             // 尝试从内置 Provider 中查询该接口
             ICredentialProviderSetUserArray* pSetUserArray;
-            hr = _pWrappedProvider->QueryInterface(IID_PPV_ARGS(&pSetUserArray));
+            hr = m_wrappedProvider->QueryInterface(IID_PPV_ARGS(&pSetUserArray));
             if (SUCCEEDED(hr))
             {
                 // 关键：把系统给我们的用户列表，原封不动地转发给内置 Provider
@@ -167,7 +167,7 @@ class CSampleProvider : public ICredentialProvider, public ICredentialProviderSe
 
   private:
     /** @brief 清理所有已创建的凭据实例。 */
-    void _CleanUpAllCredentials();
+    void CleanUpAllCredentials();
 
   private:
     LONG _cRef;  ///< COM 引用计数。
@@ -176,23 +176,17 @@ class CSampleProvider : public ICredentialProvider, public ICredentialProviderSe
     std::vector<ComPtr<CSampleCredential>> m_sample_credentials;
 
     /**
-     * @brief 凭据对象指针数组。
-     * @details 这里存放的是这个 Provider 枚举出的所有磁贴实例。
-     */
-    CSampleCredential** _rgpCredentials;
-
-    /**
      * @brief 被包装的原始提供程序。
      * @details 这是一个 Wrapper 模式的体现。我们将标准的密码提供程序封装在内。
      */
-    ICredentialProvider* _pWrappedProvider;
+    ICredentialProvider* m_wrappedProvider;
 
     /** @brief 被包装提供程序提供的凭据数量。 */
-    DWORD _dwCredentialCount;
+    DWORD m_wrappedCredentialCount;
 
     /** @brief 被包装提供程序的字段描述符数量。 */
-    DWORD _dwWrappedDescriptorCount;
+    DWORD m_wrappedDescriptorCount;
 
     /** @brief 标识是否已经处理了 SetSerialization 调用。 */
-    bool _bEnumeratedSetSerialization;
+    bool m_isEnumeratedSetSerialization;
 };

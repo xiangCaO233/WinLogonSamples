@@ -12,14 +12,14 @@ HRESULT CSampleProvider::GetFieldDescriptorCount(__out DWORD* pdwCount)
 {
     HRESULT hr = E_UNEXPECTED;
 
-    if (_pWrappedProvider != NULL)
+    if (m_wrappedProvider != NULL)
     {
         // 1. 获取内置提供程序的字段数（通常是头像、用户名、密码、提交按钮等）
-        hr = _pWrappedProvider->GetFieldDescriptorCount(&(_dwWrappedDescriptorCount));
+        hr = m_wrappedProvider->GetFieldDescriptorCount(&(m_wrappedDescriptorCount));
         if (SUCCEEDED(hr))
         {
             // 2. 总数 = 内置数 + 2（我们在 common.h 定义的标签和下拉框）
-            *pdwCount = _dwWrappedDescriptorCount + SFI_NUM_FIELDS;
+            *pdwCount = m_wrappedDescriptorCount + SFI_NUM_FIELDS;
         }
     }
 
@@ -40,13 +40,13 @@ HRESULT CSampleProvider::GetFieldDescriptorAt(
 {
     HRESULT hr = E_UNEXPECTED;
 
-    if (_pWrappedProvider != NULL && ppcpfd != NULL)
+    if (m_wrappedProvider != NULL && ppcpfd != NULL)
     {
         // A. 如果索引属于内置程序，直接转发请求
-        if (dwIndex < _dwWrappedDescriptorCount)
+        if (dwIndex < m_wrappedDescriptorCount)
         {
             // 先获取原生的描述符
-            hr = _pWrappedProvider->GetFieldDescriptorAt(dwIndex, ppcpfd);
+            hr = m_wrappedProvider->GetFieldDescriptorAt(dwIndex, ppcpfd);
 
             if (SUCCEEDED(hr))
             {
@@ -69,7 +69,7 @@ HRESULT CSampleProvider::GetFieldDescriptorAt(
         else
         {
             // 1. 计算出在我们自定义数组中的相对索引
-            dwIndex -= _dwWrappedDescriptorCount;
+            dwIndex -= m_wrappedDescriptorCount;
 
             if (dwIndex < SFI_NUM_FIELDS)
             {
@@ -77,7 +77,7 @@ HRESULT CSampleProvider::GetFieldDescriptorAt(
                 hr = FieldDescriptorCoAllocCopy(s_rgCredProvFieldDescriptors[dwIndex], ppcpfd);
 
                 // 3. 关键：修正 FieldID。ID 必须是全局唯一的，所以要加上内置程序描述符数量。
-                (**ppcpfd).dwFieldID += _dwWrappedDescriptorCount;
+                (**ppcpfd).dwFieldID += m_wrappedDescriptorCount;
             }
             else
             {

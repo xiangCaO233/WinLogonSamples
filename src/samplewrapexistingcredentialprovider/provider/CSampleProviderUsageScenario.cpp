@@ -18,26 +18,26 @@ HRESULT CSampleProvider::SetUsageScenario(__in CREDENTIAL_PROVIDER_USAGE_SCENARI
 
     // 1. 如果还没有内置提供程序，则创建一个。
     // 我们包装的是系统的密码提供程序，它负责枚举本地或域用户。
-    if (_pWrappedProvider == NULL)
+    if (m_wrappedProvider == NULL)
     {
         hr = CoCreateInstance(
-            CLSID_PasswordCredentialProvider, NULL, CLSCTX_ALL, IID_PPV_ARGS(&_pWrappedProvider));
+            CLSID_PasswordCredentialProvider, NULL, CLSCTX_ALL, IID_PPV_ARGS(&m_wrappedProvider));
     }
 
     // 2. 将场景信息转发给内置提供程序，让它也进入对应状态。
     if (SUCCEEDED(hr))
     {
 
-        hr = _pWrappedProvider->SetUsageScenario(cpus, dwFlags);
+        hr = m_wrappedProvider->SetUsageScenario(cpus, dwFlags);
     }
 
     // 3. 失败处理：如果初始化失败，立即释放
     if (FAILED(hr))
     {
-        if (_pWrappedProvider != NULL)
+        if (m_wrappedProvider != NULL)
         {
-            _pWrappedProvider->Release();
-            _pWrappedProvider = NULL;
+            m_wrappedProvider->Release();
+            m_wrappedProvider = NULL;
         }
     }
 
