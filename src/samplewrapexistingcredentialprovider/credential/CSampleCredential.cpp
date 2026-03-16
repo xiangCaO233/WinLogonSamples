@@ -11,10 +11,10 @@
 
 #include "common.h"
 #include <string>
-#ifndef WIN32_NO_STATUS
-#    include <ntstatus.h>
-#    define WIN32_NO_STATUS
-#endif
+// #ifndef WIN32_NO_STATUS
+// #    include <ntstatus.h>
+// #    define WIN32_NO_STATUS
+// #endif
 #include <unknwn.h>
 
 #include "CSampleCredential.h"
@@ -37,11 +37,6 @@ CSampleCredential::CSampleCredential()
 {
     DllAddRef();  // 增加 DLL 引用计数，防止使用中 DLL 被卸载
 
-    // 清零所有本地存储数组
-    ZeroMemory(_rgCredProvFieldDescriptors, sizeof(_rgCredProvFieldDescriptors));
-    ZeroMemory(_rgFieldStatePairs, sizeof(_rgFieldStatePairs));
-    ZeroMemory(_rgFieldStrings, sizeof(_rgFieldStrings));
-
     _pWrappedCredential        = NULL;  // 内部被包装的凭据
     _pWrappedCredentialEvents  = NULL;  // 用于拦截内部事件的中继器
     _pCredProvCredentialEvents = NULL;  // LogonUI 提供的原始事件接口
@@ -56,13 +51,6 @@ CSampleCredential::CSampleCredential()
  */
 CSampleCredential::~CSampleCredential()
 {
-    // 释放本地自定义字段使用的字符串内存
-    for (int i = 0; i < ARRAYSIZE(_rgFieldStrings); i++)
-    {
-        CoTaskMemFree(_rgFieldStrings[i]);
-        CoTaskMemFree(_rgCredProvFieldDescriptors[i].pszLabel);
-    }
-
     _CleanupEvents();  // 清理事件回调关联
 
     if (_pWrappedCredential)
@@ -86,7 +74,9 @@ CSampleCredential::~CSampleCredential()
 HRESULT CSampleCredential::Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* rgcpfd,
                                       __in const FIELD_STATE_PAIR*                     rgfsp,
                                       __in ICredentialProviderCredential* pWrappedCredential,
-                                      __in DWORD                          dwWrappedDescriptorCount)
+                                      __in DWORD                          dwWrappedDescriptorCount,
+                                      __in const std::wstring& userName,
+                                      __in const std::wstring& userSID)
 {
     HRESULT hr = S_OK;
 
@@ -103,6 +93,9 @@ HRESULT CSampleCredential::Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCR
     // 其他的才是自定义的凭据描述符
     _dwWrappedDescriptorCount = dwWrappedDescriptorCount;
 
+    m_user_info.userName = userName;
+    m_user_info.userSid  = userSID;
+
     // 3. 确保容器大小正确
     // 假设 SFI_NUM_FIELDS 是你在 common.h 定义的自定义字段数量（比如 2）
     m_custom_fields.resize(SFI_NUM_FIELDS);
@@ -116,23 +109,17 @@ HRESULT CSampleCredential::Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCR
         m_custom_fields[i].field_label             = std::wstring(rgcpfd[i].pszLabel);
         m_custom_fields[i].field_state             = rgfsp[i].cpfs;
         m_custom_fields[i].field_interactive_state = rgfsp[i].cpfis;
-
-        _rgFieldStatePairs[i] = rgfsp[i];
-        // 深度拷贝字段描述符（包括内部字符串）
-        hr = FieldDescriptorCopy(rgcpfd[i], &_rgCredProvFieldDescriptors[i]);
     }
 
     // 5. 初始化本地字段显示的文本内容
     if (SUCCEEDED(hr))
     {
         m_field_current_texts[SFI_I_WORK_IN_STATIC] = L"I Work In:";
-        hr = SHStrDupW(L"I Work In:", &_rgFieldStrings[SFI_I_WORK_IN_STATIC]);
     }
     if (SUCCEEDED(hr))
     {
         // 这里的 L"Database" 是程序内部标识，UI 显示内容在 GetComboBoxValueAt 中处理
         m_field_current_texts[SFI_DATABASE_COMBOBOX] = L"Database";
-        hr = SHStrDupW(L"Database", &_rgFieldStrings[SFI_DATABASE_COMBOBOX]);
     }
 
     return hr;
@@ -249,18 +236,6 @@ HRESULT CSampleCredential::GetFieldState(__in DWORD                             
             {
                 hr = E_INVALIDARG;
             }
-
-            FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
-            if (pfsp != NULL)
-            {
-                *pcpfs  = pfsp->cpfs;
-                *pcpfis = pfsp->cpfis;
-                hr      = S_OK;
-            }
-            else
-            {
-                hr = E_INVALIDARG;
-            }
         }
     }
     return hr;
@@ -290,17 +265,6 @@ HRESULT CSampleCredential::GetStringValue(__in DWORD dwFieldID, __deref_out PWST
             if (custom_field_index < SFI_NUM_FIELDS)
             {
                 hr = AllocateComString(m_custom_fields[custom_field_index].field_label, ppwsz);
-            }
-            else
-            {
-                hr = E_INVALIDARG;
-            }
-
-            FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
-            if (pfsp != NULL)
-            {
-                // 这里的 SFI_I_WORK_IN_STATIC 实际上返回 "I Work In:" 标签
-                hr = SHStrDupW(_rgFieldStrings[SFI_I_WORK_IN_STATIC], ppwsz);
             }
             else
             {
@@ -343,20 +307,6 @@ HRESULT CSampleCredential::GetComboBoxValueCount(__in DWORD dwFieldID, __out DWO
             {
                 hr = E_INVALIDARG;
             }
-
-            FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
-            if (pfsp != NULL)
-            {
-                // 返回在 common.h 中定义的部门数据库数组大小
-                *pcItems = ARRAYSIZE(s_rgDatabases);
-                // 返回本地存储的当前选择索引
-                *pdwSelectedItem = _dwDatabaseIndex;
-                hr               = S_OK;
-            }
-            else
-            {
-                hr = E_INVALIDARG;
-            }
         }
     }
 
@@ -386,17 +336,6 @@ HRESULT CSampleCredential::GetComboBoxValueAt(__in DWORD dwFieldID, __in DWORD d
                 {
                     hr = AllocateComString(s_comboBoxDatabases[dwItem], ppwszItem);
                 }
-            }
-            else
-            {
-                hr = E_INVALIDARG;
-            }
-
-            FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
-            if ((pfsp != NULL) && (dwItem < ARRAYSIZE(s_rgDatabases)))
-            {
-                // 从静态数组中取字符串并拷贝给系统
-                hr = SHStrDupW(s_rgDatabases[dwItem], ppwszItem);
             }
             else
             {
@@ -432,18 +371,6 @@ HRESULT CSampleCredential::SetComboBoxSelectedValue(__in DWORD dwFieldID, __in D
                     _dwDatabaseIndex = dwSelectedItem;
                     hr               = S_OK;
                 }
-            }
-            else
-            {
-                hr = E_INVALIDARG;
-            }
-
-            FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
-            if ((pfsp != NULL) && (dwSelectedItem < ARRAYSIZE(s_rgDatabases)))
-            {
-                // 更新本地状态，以便 GetSerialization 时使用
-                _dwDatabaseIndex = dwSelectedItem;
-                hr               = S_OK;
             }
             else
             {
@@ -554,23 +481,6 @@ HRESULT CSampleCredential::ReportResult(
 BOOL CSampleCredential::_IsFieldInWrappedCredential(__in DWORD dwFieldID)
 {
     return (dwFieldID < _dwWrappedDescriptorCount);
-}
-
-/**
- * @brief 私有辅助：将全局 FieldID 映射到本地索引并查表。
- */
-FIELD_STATE_PAIR* CSampleCredential::_LookupLocalFieldStatePair(__in DWORD dwFieldID)
-{
-    // 减去偏移量，得到相对索引
-    dwFieldID -= _dwWrappedDescriptorCount;
-
-    // 检查索引合法性
-    if (dwFieldID < SFI_NUM_FIELDS)
-    {
-        return &(_rgFieldStatePairs[dwFieldID]);
-    }
-
-    return NULL;
 }
 
 /**

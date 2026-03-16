@@ -27,6 +27,7 @@ HRESULT CSampleProvider::SetUsageScenario(__in CREDENTIAL_PROVIDER_USAGE_SCENARI
     // 2. 将场景信息转发给内置提供程序，让它也进入对应状态。
     if (SUCCEEDED(hr))
     {
+
         hr = _pWrappedProvider->SetUsageScenario(cpus, dwFlags);
     }
 

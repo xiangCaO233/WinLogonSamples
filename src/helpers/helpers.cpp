@@ -13,6 +13,78 @@
 #include "helpers.h"
 #include <intsafe.h>
 #include <wincred.h>
+#include <windows.h>
+#include <lm.h>
+#include <sddl.h>
+
+void WriteLog(const std::wstring& message)
+{
+    OutputDebugStringW((L"[SampleCP] " + message + L"\n").c_str());
+}
+
+// 获取系统中所有正常用户的 [用户名 -> SID] 映射
+std::map<std::wstring, std::wstring> GetLocalUserSidMap()
+{
+    std::map<std::wstring, std::wstring> userMap;
+    USER_INFO_0*                         pBuf           = NULL;
+    DWORD                                dwEntriesRead  = 0;
+    DWORD                                dwTotalEntries = 0;
+
+    // 1. 枚举本地普通用户
+    NET_API_STATUS nStatus = NetUserEnum(NULL,
+                                         0,
+                                         FILTER_NORMAL_ACCOUNT,
+                                         (LPBYTE*)&pBuf,
+                                         MAX_PREFERRED_LENGTH,
+                                         &dwEntriesRead,
+                                         &dwTotalEntries,
+                                         NULL);
+
+    if (nStatus == NERR_Success)
+    {
+        for (DWORD i = 0; i < dwEntriesRead; i++)
+        {
+            std::wstring username = pBuf[i].usri0_name;
+
+            // 跳过一些系统内置的特殊账户（可选，根据需要增加）
+            if (username == L"WDAGUtilityAccount")
+                continue;
+
+            // 2. 根据用户名查询 SID
+            DWORD        cbSid    = 0;
+            DWORD        cbDomain = 0;
+            SID_NAME_USE snu;
+            LookupAccountNameW(NULL, username.c_str(), NULL, &cbSid, NULL, &cbDomain, &snu);
+
+            if (cbSid > 0)
+            {
+                PSID   pSid     = (PSID)malloc(cbSid);
+                LPWSTR szDomain = (LPWSTR)malloc(cbDomain * sizeof(WCHAR));
+
+                if (LookupAccountNameW(
+                        NULL, username.c_str(), pSid, &cbSid, szDomain, &cbDomain, &snu))
+                {
+                    LPWSTR szStringSid = NULL;
+                    // 3. 将二进制 SID 转换为字符串格式
+                    if (ConvertSidToStringSidW(pSid, &szStringSid))
+                    {
+                        userMap[username] = szStringSid;
+                        LocalFree(szStringSid);
+                    }
+                }
+                free(pSid);
+                free(szDomain);
+            }
+        }
+        NetApiBufferFree(pBuf);
+    }
+
+    // 过滤掉系统自带用户
+    userMap.erase(L"Administrator");
+    userMap.erase(L"Guest");
+    userMap.erase(L"DefaultAccount");
+    return userMap;
+}
 
 // 专门负责把 std::wstring 转换为 Windows 需要的 COM 字符串
 // 修改逻辑：传入指向指针的地址，内部申请内存

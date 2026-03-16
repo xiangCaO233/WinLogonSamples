@@ -22,7 +22,7 @@
 #include "resource.h"
 #include "events/CWrappedCredentialEvents.h"  // 用于包装事件回调的转换器
 
-class CSampleCredential : public ICredentialProviderCredential
+class CSampleCredential : public ICredentialProviderCredential2
 {
   public:
     // --- IUnknown 接口实现 (COM 基础) ---
@@ -42,10 +42,28 @@ class CSampleCredential : public ICredentialProviderCredential
         return cRef;
     }
 
+    IFACEMETHODIMP GetUserSid(__deref_out PWSTR* ppwszUserSid) override
+    {
+        *ppwszUserSid = nullptr;
+        if (_pWrappedCredential)
+        {
+            ICredentialProviderCredential2* pV2 = nullptr;
+            HRESULT hr = _pWrappedCredential->QueryInterface(IID_PPV_ARGS(&pV2));
+            if (SUCCEEDED(hr) && pV2)
+            {  // 必须判断 pV2
+                hr = pV2->GetUserSid(ppwszUserSid);
+                pV2->Release();
+                return hr;
+            }
+        }
+        return E_NOTIMPL;
+    }
+
     IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override
     {
         static const QITAB qit[] = {
             QITABENT(CSampleCredential, ICredentialProviderCredential),
+            QITABENT(CSampleCredential, ICredentialProviderCredential2),
             {0},
         };
         return QISearch(this, qit, riid, ppv);
@@ -151,7 +169,8 @@ class CSampleCredential : public ICredentialProviderCredential
     HRESULT Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* rgcpfd,
                        __in const FIELD_STATE_PAIR*                     rgfsp,
                        __in ICredentialProviderCredential*              pWrappedCredential,
-                       __in DWORD                                       dwWrappedDescriptorCount);
+                       __in DWORD dwWrappedDescriptorCount, __in const std::wstring& userName = L"",
+                       __in const std::wstring& userSID = L"");
 
     CSampleCredential();
     virtual ~CSampleCredential();
@@ -159,9 +178,6 @@ class CSampleCredential : public ICredentialProviderCredential
   private:
     /** @brief 判断给定的 FieldID 是否属于内置磁贴（还是属于我们自定义的部分）。 */
     BOOL _IsFieldInWrappedCredential(__in DWORD dwFieldID);
-
-    /** @brief 查找自定义字段的显示状态对。 */
-    FIELD_STATE_PAIR* _LookupLocalFieldStatePair(__in DWORD dwFieldID);
 
     /** @brief 释放事件回调对象。 */
     void _CleanupEvents();
@@ -186,15 +202,16 @@ class CSampleCredential : public ICredentialProviderCredential
     };
     std::vector<FieldInfo> m_custom_fields;
 
-    /** @brief 存储自定义字段的描述信息（如下拉框类型）。 */
-    CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR _rgCredProvFieldDescriptors[SFI_NUM_FIELDS];
-
-    /** @brief 存储自定义字段的初始显示状态（如在磁贴选中时显示）。 */
-    FIELD_STATE_PAIR _rgFieldStatePairs[SFI_NUM_FIELDS];
-
     /** @brief 存储自定义字段的当前字符串内容（如文本标签的 L"I work in"）。 */
     std::vector<std::wstring> m_field_current_texts;
-    PWSTR                     _rgFieldStrings[SFI_NUM_FIELDS];
+
+    /** @brief 凭证的对应用户信息 */
+    struct CredentialUserInfo
+    {
+        std::wstring userName;
+        std::wstring userSid;
+    };
+    CredentialUserInfo m_user_info;
 
     /**
      * @var s_comboBoxDatabases
@@ -202,12 +219,6 @@ class CSampleCredential : public ICredentialProviderCredential
      * @details 这是一个静态模拟数据库，用户在组合框中看到并选择这些选项。
      */
     static const std::vector<std::wstring> s_comboBoxDatabases;
-    static const PWSTR                     s_rgDatabases[] = {
-        const_cast<PWSTR>(L"Operations"),       // 运营部
-        const_cast<PWSTR>(L"Human Resources"),  // 人力资源部
-        const_cast<PWSTR>(L"Sales"),            // 销售部
-        const_cast<PWSTR>(L"Finance"),          // 财务部
-    };
 
     /**
      * @brief 事件中继器。

@@ -60,7 +60,8 @@ HRESULT CSampleProvider::GetFieldDescriptorAt(
 
                     // 重新分配你想要的标签名称
                     // 注意：必须使用 CoTaskMemAlloc 分配，或者使用 SHStrDupW
-                    hr = SHStrDupW(L"授权码", &((*ppcpfd)->pszLabel));
+                    hr = AllocateComString(L"cnm", &((*ppcpfd)->pszLabel));
+                    // hr = SHStrDupW(L"授权码", &((*ppcpfd)->pszLabel));
                 }
             }
         }
@@ -75,8 +76,8 @@ HRESULT CSampleProvider::GetFieldDescriptorAt(
                 // 2. 从 common.h 定义的静态数组中拷贝描述符
                 hr = FieldDescriptorCoAllocCopy(s_rgCredProvFieldDescriptors[dwIndex], ppcpfd);
 
-                // 3. 关键：修正 FieldID。ID 必须是全局唯一的，所以要加上内置程序的偏移量。
-                (*ppcpfd)->dwFieldID += _dwWrappedDescriptorCount;
+                // 3. 关键：修正 FieldID。ID 必须是全局唯一的，所以要加上内置程序描述符数量。
+                (**ppcpfd).dwFieldID += _dwWrappedDescriptorCount;
             }
             else
             {

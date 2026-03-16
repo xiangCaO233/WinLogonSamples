@@ -17,81 +17,6 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
                                             __out_range(<, *pdwCount) DWORD* pdwDefault,
                                             __out BOOL*                      pbAutoLogonWithDefault)
 {
-    // // 1. 初始化输出参数
-    // *pdwCount               = 0;
-    // *pdwDefault             = 0;
-    // *pbAutoLogonWithDefault = FALSE;
-
-    // if (_pWrappedProvider == nullptr)
-    //     return E_UNEXPECTED;
-
-    // // 2. 清理旧数据：vector 的 clear 会自动调用内部 ComPtr 的 Release
-    // m_sample_credentials.clear();
-
-    // DWORD dwCount    = 0;
-    // DWORD dwDefault  = 0;
-    // BOOL  bAutoLogon = FALSE;
-
-    // // 3. 获取内置提供程序的磁贴信息
-    // HRESULT hr = _pWrappedProvider->GetCredentialCount(&dwCount, &dwDefault, &bAutoLogon);
-
-    // if (SUCCEEDED(hr))
-    // {
-    //     // 预留空间，提高性能
-    //     m_sample_credentials.reserve(dwCount);
-
-    //     for (DWORD i = 0; i < dwCount; i++)
-    //     {
-    //         // 4. 创建我们的包装类实例
-    //         // 注意：这里使用 new 创建，并立即交给 ComPtr 管理
-    //         ComPtr<CSampleCredential> pMyCredential(new (std::nothrow) CSampleCredential());
-
-    //         if (pMyCredential)
-    //         {
-    //             // 5. 获取对应的内置磁贴
-    //             ComPtr<ICredentialProviderCredential> pWrappedCred;
-    //             hr = _pWrappedProvider->GetCredentialAt(i, &pWrappedCred);
-
-    //             if (SUCCEEDED(hr))
-    //             {
-    //                 // 6. 初始化我们的包装磁贴
-    //                 hr = pMyCredential->Initialize(s_rgCredProvFieldDescriptors,
-    //                                                s_rgFieldStatePairs,
-    //                                                pWrappedCred.Get(),  // 获取原始指针传进去
-    //                                                _dwWrappedDescriptorCount);
-
-    //                 if (SUCCEEDED(hr))
-    //                 {
-    //                     // 7. 成功后存入 vector
-    //                     m_sample_credentials.push_back(pMyCredential);
-    //                 }
-    //             }
-    //         }
-    //         else
-    //         {
-    //             hr = E_OUTOFMEMORY;
-    //         }
-
-    //         if (FAILED(hr))
-    //             break;  // 如果其中一个失败，跳出循环
-    //     }
-    // }
-
-    // // 8. 最终赋值
-    // if (SUCCEEDED(hr))
-    // {
-    //     *pdwCount               = static_cast<DWORD>(m_sample_credentials.size());
-    //     *pdwDefault             = dwDefault;
-    //     *pbAutoLogonWithDefault = bAutoLogon;
-    // }
-    // else
-    // {
-    //     // 如果中间失败了，vector 析构时会自动清理已创建的对象
-    //     m_sample_credentials.clear();
-    // }
-
-    // return hr;
-
     HRESULT hr                    = E_UNEXPECTED;
     DWORD   dwDefault             = 0;
     BOOL    bAutoLogonWithDefault = FALSE;
@@ -183,6 +108,7 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
         *pdwCount               = _dwCredentialCount;
         *pdwDefault             = dwDefault;
         *pbAutoLogonWithDefault = bAutoLogonWithDefault;
+        WriteLog(L"内置提供程序返回磁贴总数: " + std::to_wstring(_dwCredentialCount));
     }
 
     return hr;
