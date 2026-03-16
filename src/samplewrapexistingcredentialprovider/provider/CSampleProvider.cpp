@@ -51,6 +51,8 @@ CSampleProvider::~CSampleProvider()
  */
 void CSampleProvider::_CleanUpAllCredentials()
 {
+    m_sample_credentials.clear();
+
     if (_rgpCredentials != NULL)
     {
         for (DWORD lcv = 0; lcv < _dwCredentialCount; lcv++)

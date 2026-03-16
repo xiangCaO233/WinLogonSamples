@@ -27,7 +27,7 @@ using Microsoft::WRL::ComPtr;
  * @class CSampleProvider
  * @brief 示例凭据提供程序的主控类。
  */
-class CSampleProvider : public ICredentialProvider
+class CSampleProvider : public ICredentialProvider, public ICredentialProviderSetUserArray
 {
   public:
     // --- IUnknown 接口实现 (COM 基础) ---
@@ -56,6 +56,26 @@ class CSampleProvider : public ICredentialProvider
         return cRef;
     }
 
+    // 实现 ICredentialProviderSetUserArray
+    IFACEMETHODIMP SetUserArray(__in ICredentialProviderUserArray* users) override
+    {
+        HRESULT hr = E_NOTIMPL;
+        if (_pWrappedProvider != NULL)
+        {
+            // 尝试从内置 Provider 中查询该接口
+            ICredentialProviderSetUserArray* pSetUserArray;
+            hr = _pWrappedProvider->QueryInterface(IID_PPV_ARGS(&pSetUserArray));
+            if (SUCCEEDED(hr))
+            {
+                // 关键：把系统给我们的用户列表，原封不动地转发给内置 Provider
+                hr = pSetUserArray->SetUserArray(users);
+                pSetUserArray->Release();
+
+                WriteLog(L"成功将 UserArray 转发给内置 Provider");
+            }
+        }
+        return hr;
+    }
     /**
      * @brief 接口查询。
      * @details 系统通过此方法确认该对象是否支持 ICredentialProvider 接口。
@@ -63,7 +83,8 @@ class CSampleProvider : public ICredentialProvider
     IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override
     {
         static const QITAB qit[] = {
-            QITABENT(CSampleProvider, ICredentialProvider),  // 暴露给系统的核心接口
+            QITABENT(CSampleProvider, ICredentialProvider),              // 暴露给系统的核心接口
+            QITABENT(CSampleProvider, ICredentialProviderSetUserArray),  // 新增
             {0},
         };
         return QISearch(this, qit, riid, ppv);
