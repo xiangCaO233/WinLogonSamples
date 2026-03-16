@@ -14,6 +14,36 @@
 #include <intsafe.h>
 #include <wincred.h>
 
+// 专门负责把 std::wstring 转换为 Windows 需要的 COM 字符串
+// 修改逻辑：传入指向指针的地址，内部申请内存
+HRESULT AllocateComString(const std::wstring& str, PWSTR* ppout)
+{
+    if (ppout == nullptr)
+        return E_POINTER;
+    *ppout = nullptr;
+
+    // 即使 str 为空，通常也建议分配一个包含空终止符的内存块
+    size_t charCount = str.length() + 1;
+    size_t byteCount = charCount * sizeof(wchar_t);
+
+    // 必须使用 CoTaskMemAlloc！！
+    // 这样 Windows 收到后才能用 CoTaskMemFree 释放它
+    PWSTR pDest = (PWSTR)CoTaskMemAlloc(byteCount);
+
+    if (pDest == nullptr)
+    {
+        return E_OUTOFMEMORY;
+    }
+
+    // 安全拷贝
+    wcscpy_s(pDest, charCount, str.c_str());
+
+    // 将申请好的内存地址“交给”传进来的指针
+    *ppout = pDest;
+
+    return S_OK;
+}
+
 /**
  * @brief 深度拷贝一个字段描述符，并使用 CoTaskMemAlloc 分配内存。
  *

@@ -28,6 +28,11 @@
 #include <shlwapi.h>
 #pragma warning(pop)
 
+#include <string>
+
+// 专门负责把 std::wstring 转换为 Windows 需要的 COM 字符串
+HRESULT AllocateComString(const std::wstring& str, PWSTR* ppout);
+
 /**
  * @brief 使用 CoTaskMemAlloc 分配内存并拷贝字段描述符。
  *

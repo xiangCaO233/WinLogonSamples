@@ -9,6 +9,8 @@
  * 2. 如果请求的是我们新增的字段（如部门下拉框），则由本类自行处理。
  */
 
+#include "common.h"
+#include <string>
 #ifndef WIN32_NO_STATUS
 #    include <ntstatus.h>
 #    define WIN32_NO_STATUS
@@ -18,6 +20,13 @@
 #include "CSampleCredential.h"
 #include "events/CWrappedCredentialEvents.h"
 #include "guid.h"
+
+const std::vector<std::wstring> CSampleCredential::s_comboBoxDatabases{
+    L"Operations",       // 运营部
+    L"Human Resources",  // 人力资源部
+    L"Sales",            // 销售部
+    L"Finance",          // 财务部
+};
 
 /**
  * @brief 构造函数。
@@ -89,25 +98,40 @@ HRESULT CSampleCredential::Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCR
     _pWrappedCredential = pWrappedCredential;
     _pWrappedCredential->AddRef();
 
-    // 2. 记住偏移量：所有 ID 小于此值的请求都属于原始凭据
+    // 2. 记住原始的描述符数量：
+    // 所有 ID 小于此值的请求都属于原始凭据描述符
+    // 其他的才是自定义的凭据描述符
     _dwWrappedDescriptorCount = dwWrappedDescriptorCount;
 
-    // 3. 拷贝自定义字段的描述符信息
-    for (DWORD i = 0; SUCCEEDED(hr) && i < ARRAYSIZE(_rgCredProvFieldDescriptors); i++)
+    // 3. 确保容器大小正确
+    // 假设 SFI_NUM_FIELDS 是你在 common.h 定义的自定义字段数量（比如 2）
+    m_custom_fields.resize(SFI_NUM_FIELDS);
+    m_field_current_texts.resize(SFI_NUM_FIELDS);
+
+    // 4. 拷贝自定义字段的描述符信息
+    for (DWORD i = 0; SUCCEEDED(hr) && i < m_custom_fields.size(); i++)
     {
+        m_custom_fields[i].field_id                = rgcpfd[i].dwFieldID;
+        m_custom_fields[i].field_type              = rgcpfd[i].cpft;
+        m_custom_fields[i].field_label             = std::wstring(rgcpfd[i].pszLabel);
+        m_custom_fields[i].field_state             = rgfsp[i].cpfs;
+        m_custom_fields[i].field_interactive_state = rgfsp[i].cpfis;
+
         _rgFieldStatePairs[i] = rgfsp[i];
         // 深度拷贝字段描述符（包括内部字符串）
         hr = FieldDescriptorCopy(rgcpfd[i], &_rgCredProvFieldDescriptors[i]);
     }
 
-    // 4. 初始化本地字段显示的文本内容
+    // 5. 初始化本地字段显示的文本内容
     if (SUCCEEDED(hr))
     {
+        m_field_current_texts[SFI_I_WORK_IN_STATIC] = L"I Work In:";
         hr = SHStrDupW(L"I Work In:", &_rgFieldStrings[SFI_I_WORK_IN_STATIC]);
     }
     if (SUCCEEDED(hr))
     {
         // 这里的 L"Database" 是程序内部标识，UI 显示内容在 GetComboBoxValueAt 中处理
+        m_field_current_texts[SFI_DATABASE_COMBOBOX] = L"Database";
         hr = SHStrDupW(L"Database", &_rgFieldStrings[SFI_DATABASE_COMBOBOX]);
     }
 
@@ -207,12 +231,25 @@ HRESULT CSampleCredential::GetFieldState(__in DWORD                             
     {
         if (_IsFieldInWrappedCredential(dwFieldID))
         {
-            // 转发请求：询问内部凭据它的字段（如密码框）现在应该长啥样
+            // 原有的字段直接转发请求：
+            // 询问内部凭据它的字段（如密码框）现在应该长啥样
             hr = _pWrappedCredential->GetFieldState(dwFieldID, pcpfs, pcpfis);
         }
         else
         {
-            // 本地处理：查我们自己的 `s_rgFieldStatePairs` 表
+            // 本地处理：查我们自己的字段状态和交互状态
+            DWORD custom_field_index = dwFieldID - _dwWrappedDescriptorCount;
+            if (custom_field_index < SFI_NUM_FIELDS)
+            {
+                *pcpfs  = m_custom_fields[custom_field_index].field_state;
+                *pcpfis = m_custom_fields[custom_field_index].field_interactive_state;
+                hr      = S_OK;
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
+
             FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
             if (pfsp != NULL)
             {
@@ -232,6 +269,10 @@ HRESULT CSampleCredential::GetFieldState(__in DWORD                             
 /** @brief 获取字段显示的文本。逻辑同上：转发或本地返回。 */
 HRESULT CSampleCredential::GetStringValue(__in DWORD dwFieldID, __deref_out PWSTR* ppwsz)
 {
+    // 参数校验
+    if (ppwsz == nullptr)
+        return E_POINTER;
+    *ppwsz = nullptr;  // 先清空，防止异常
 
     HRESULT hr = E_UNEXPECTED;
 
@@ -239,10 +280,22 @@ HRESULT CSampleCredential::GetStringValue(__in DWORD dwFieldID, __deref_out PWST
     {
         if (_IsFieldInWrappedCredential(dwFieldID))
         {
+            // 原有的字段直接转发请求：
             hr = _pWrappedCredential->GetStringValue(dwFieldID, ppwsz);
         }
         else
         {
+            // 本地处理：查我们自己的字段状态和交互状态
+            DWORD custom_field_index = dwFieldID - _dwWrappedDescriptorCount;
+            if (custom_field_index < SFI_NUM_FIELDS)
+            {
+                hr = AllocateComString(m_custom_fields[custom_field_index].field_label, ppwsz);
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
+
             FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
             if (pfsp != NULL)
             {
@@ -272,6 +325,25 @@ HRESULT CSampleCredential::GetComboBoxValueCount(__in DWORD dwFieldID, __out DWO
         }
         else
         {
+            DWORD custom_field_index = dwFieldID - _dwWrappedDescriptorCount;
+            if (custom_field_index < SFI_NUM_FIELDS)
+            {
+                const FieldInfo& field_info = m_custom_fields[custom_field_index];
+                // 确保类型是combobox
+                if (field_info.field_type == CPFT_COMBOBOX)
+                {
+                    // 返回在 common.h 中定义的部门数据库数组大小
+                    *pcItems = s_comboBoxDatabases.size();
+                    // 返回本地存储的当前选择索引
+                    *pdwSelectedItem = _dwDatabaseIndex;
+                    hr               = S_OK;
+                }
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
+
             FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
             if (pfsp != NULL)
             {
@@ -305,6 +377,21 @@ HRESULT CSampleCredential::GetComboBoxValueAt(__in DWORD dwFieldID, __in DWORD d
         }
         else
         {
+            DWORD custom_field_index = dwFieldID - _dwWrappedDescriptorCount;
+            if (custom_field_index < SFI_NUM_FIELDS)
+            {
+                const FieldInfo& field_info = m_custom_fields[custom_field_index];
+                // 确保类型是combobox
+                if (field_info.field_type == CPFT_COMBOBOX)
+                {
+                    hr = AllocateComString(s_comboBoxDatabases[dwItem], ppwszItem);
+                }
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
+
             FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
             if ((pfsp != NULL) && (dwItem < ARRAYSIZE(s_rgDatabases)))
             {
@@ -334,6 +421,23 @@ HRESULT CSampleCredential::SetComboBoxSelectedValue(__in DWORD dwFieldID, __in D
         }
         else
         {
+            DWORD custom_field_index = dwFieldID - _dwWrappedDescriptorCount;
+            if (custom_field_index < SFI_NUM_FIELDS)
+            {
+                const FieldInfo& field_info = m_custom_fields[custom_field_index];
+                // 确保类型是combobox
+                if (field_info.field_type == CPFT_COMBOBOX)
+                {
+                    // 更新本地状态，以便 GetSerialization 时使用
+                    _dwDatabaseIndex = dwSelectedItem;
+                    hr               = S_OK;
+                }
+            }
+            else
+            {
+                hr = E_INVALIDARG;
+            }
+
             FIELD_STATE_PAIR* pfsp = _LookupLocalFieldStatePair(dwFieldID);
             if ((pfsp != NULL) && (dwSelectedItem < ARRAYSIZE(s_rgDatabases)))
             {

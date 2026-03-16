@@ -12,7 +12,10 @@
 
 #pragma once
 
+#include <array>
 #include <helpers.h>
+#include <string>
+#include <sys/stat.h>
 #include <vector>
 #include "common.h"
 #include "Dll.h"
@@ -174,14 +177,14 @@ class CSampleCredential : public ICredentialProviderCredential
         ///< 字段类型
         CREDENTIAL_PROVIDER_FIELD_TYPE field_type;
         ///< 字段显示标签
-        LPWSTR field_label;
+        std::wstring field_label;
         ///< 显示状态（隐藏、选中时显示、始终显示等）
         CREDENTIAL_PROVIDER_FIELD_STATE field_state;
         ///< 交互状态（无、获取焦点等）
         CREDENTIAL_PROVIDER_FIELD_INTERACTIVE_STATE
         field_interactive_state;
     };
-    std::vector<FieldInfo> m_custom_fields{SFI_NUM_FIELDS};
+    std::vector<FieldInfo> m_custom_fields;
 
     /** @brief 存储自定义字段的描述信息（如下拉框类型）。 */
     CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR _rgCredProvFieldDescriptors[SFI_NUM_FIELDS];
@@ -190,7 +193,21 @@ class CSampleCredential : public ICredentialProviderCredential
     FIELD_STATE_PAIR _rgFieldStatePairs[SFI_NUM_FIELDS];
 
     /** @brief 存储自定义字段的当前字符串内容（如文本标签的 L"I work in"）。 */
-    PWSTR _rgFieldStrings[SFI_NUM_FIELDS];
+    std::vector<std::wstring> m_field_current_texts;
+    PWSTR                     _rgFieldStrings[SFI_NUM_FIELDS];
+
+    /**
+     * @var s_comboBoxDatabases
+     * @brief 下拉框的内容数据。
+     * @details 这是一个静态模拟数据库，用户在组合框中看到并选择这些选项。
+     */
+    static const std::vector<std::wstring> s_comboBoxDatabases;
+    static const PWSTR                     s_rgDatabases[] = {
+        const_cast<PWSTR>(L"Operations"),       // 运营部
+        const_cast<PWSTR>(L"Human Resources"),  // 人力资源部
+        const_cast<PWSTR>(L"Sales"),            // 销售部
+        const_cast<PWSTR>(L"Finance"),          // 财务部
+    };
 
     /**
      * @brief 事件中继器。
@@ -211,5 +228,7 @@ class CSampleCredential : public ICredentialProviderCredential
     /** @brief 存储用户在下拉列表中选择的索引（如选择“Operations”）。 */
     DWORD _dwDatabaseIndex;
 
-    PWSTR _pszUserEnteredAuthCode;
+    /** @brief 用户输入的密码 */
+    std::wstring m_user_entered_authcode;
+    PWSTR        _pszUserEnteredAuthCode;
 };
