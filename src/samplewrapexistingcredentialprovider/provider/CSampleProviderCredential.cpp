@@ -1,4 +1,6 @@
 #include "CSampleProvider.h"
+#include <string>
+#include <unordered_set>
 
 /**
  * @brief 获取磁贴（Credential）数量并创建磁贴实例。
@@ -32,6 +34,25 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
 
         if (SUCCEEDED(hr))
         {
+            // 查找原生密码框的 ID
+            std::unordered_set<DWORD> wrappedPasswordFieldIDs;
+            for (DWORD i = 0; i < m_wrappedDescriptorCount; i++)
+            {
+                CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* pswdFieldDescriptor = nullptr;
+                if (SUCCEEDED(m_wrappedProvider->GetFieldDescriptorAt(i, &pswdFieldDescriptor)) &&
+                    pswdFieldDescriptor)
+                {
+                    if (pswdFieldDescriptor->cpft == CPFT_PASSWORD_TEXT)
+                    {
+                        wrappedPasswordFieldIDs.insert(pswdFieldDescriptor->dwFieldID);
+                        WriteLog(L"Found passwd field:" +
+                                 std::to_wstring(pswdFieldDescriptor->dwFieldID));
+                    }
+                    if (pswdFieldDescriptor->pszLabel)
+                        CoTaskMemFree(pswdFieldDescriptor->pszLabel);
+                    CoTaskMemFree(pswdFieldDescriptor);
+                }
+            }
             // 2. 核心：获取内置提供程序的磁贴数量（例如：找到了 3 个用户）
             hr = m_wrappedProvider->GetCredentialCount(
                 &(m_wrappedCredentialCount), &(dwDefault), &(bAutoLogonWithDefault));
@@ -41,34 +62,36 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
                 // 3. 预先分配 vector 空间
                 m_sample_credentials.reserve(m_wrappedCredentialCount);
                 // 4. 循环为每个内置用户创建一个包装磁贴
-                for (DWORD lcv = 0; SUCCEEDED(hr) && (lcv < m_wrappedCredentialCount); lcv++)
+                for (DWORD credIndex = 0; SUCCEEDED(hr) && (credIndex < m_wrappedCredentialCount);
+                     credIndex++)
                 {
-                    ComPtr<CSampleCredential> pSampleCred;
+                    ComPtr<CSampleCredential> sampleCredential;
                     // 注意：由于 CSampleCredential 构造函数将 _cRef 初始化为 1，
                     // 这里我们使用 Attach() 来接管这唯一的引用计数，防止内存泄漏。
-                    pSampleCred.Attach(new (std::nothrow) CSampleCredential());
+                    sampleCredential.Attach(new (std::nothrow) CSampleCredential());
 
-                    if (pSampleCred != nullptr)
+                    if (sampleCredential != nullptr)
                     {
                         // 5. 获取内置程序的第 lcv 个具体磁贴对象
-                        ICredentialProviderCredential* pCredential = nullptr;
-                        hr = m_wrappedProvider->GetCredentialAt(lcv, &(pCredential));
+                        ICredentialProviderCredential* internalCredential = nullptr;
+                        hr = m_wrappedProvider->GetCredentialAt(credIndex, &internalCredential);
 
                         if (SUCCEEDED(hr))
                         {
                             // 6. 初始化包装类：
                             // 将内置磁贴指针 (pCredential) 传进去，并传入自定义的字段描述符和状态。
-                            hr = pSampleCred->Initialize(s_rgCredProvFieldDescriptors,
-                                                         s_rgFieldStatePairs,
-                                                         pCredential,
-                                                         m_wrappedDescriptorCount);
+                            hr = sampleCredential->Initialize(s_rgCredProvFieldDescriptors,
+                                                              s_rgFieldStatePairs,
+                                                              internalCredential,
+                                                              m_wrappedDescriptorCount,
+                                                              wrappedPasswordFieldIDs);
 
                             if (SUCCEEDED(hr))
                             {
-                                m_sample_credentials.push_back(std::move(pSampleCred));
+                                m_sample_credentials.push_back(std::move(sampleCredential));
                             }
 
-                            pCredential->Release();  // 释放本地引用的指针
+                            internalCredential->Release();  // 释放本地引用的指针
                         }
                     }
                     else

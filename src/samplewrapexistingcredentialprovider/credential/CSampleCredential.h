@@ -15,6 +15,7 @@
 #include <helpers.h>
 #include <string>
 #include <sys/stat.h>
+#include <unordered_set>
 #include <vector>
 #include "common.h"
 #include "resource.h"
@@ -40,32 +41,9 @@ class CSampleCredential : public ICredentialProviderCredential2
         return cRef;
     }
 
-    IFACEMETHODIMP GetUserSid(__deref_out PWSTR* ppwszUserSid) override
-    {
-        *ppwszUserSid = nullptr;
-        if (m_wrappedCredential)
-        {
-            ICredentialProviderCredential2* pV2 = nullptr;
-            HRESULT hr = m_wrappedCredential->QueryInterface(IID_PPV_ARGS(&pV2));
-            if (SUCCEEDED(hr) && pV2)
-            {  // 必须判断 pV2
-                hr = pV2->GetUserSid(ppwszUserSid);
-                pV2->Release();
-                return hr;
-            }
-        }
-        return E_NOTIMPL;
-    }
+    IFACEMETHODIMP GetUserSid(__deref_out PWSTR* ppwszUserSid) override;
 
-    IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override
-    {
-        static const QITAB qit[] = {
-            QITABENT(CSampleCredential, ICredentialProviderCredential),
-            QITABENT(CSampleCredential, ICredentialProviderCredential2),
-            {0},
-        };
-        return QISearch(this, qit, riid, ppv);
-    }
+    IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override;
 
   public:
     // --- ICredentialProviderCredential 核心接口方法 ---
@@ -167,8 +145,10 @@ class CSampleCredential : public ICredentialProviderCredential2
     HRESULT Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR* rgcpfd,
                        __in const FIELD_STATE_PAIR*                     rgfsp,
                        __in ICredentialProviderCredential*              pWrappedCredential,
-                       __in DWORD dwWrappedDescriptorCount, __in const std::wstring& userName = L"",
-                       __in const std::wstring& userSID = L"");
+                       __in DWORD                                       dwWrappedDescriptorCount,
+                       __in const std::unordered_set<DWORD>& wrappedPasswordFieldIDs,
+                       __in const std::wstring& userName = L"",
+                       __in const std::wstring& userSID  = L"");
 
     CSampleCredential();
     virtual ~CSampleCredential();
@@ -237,6 +217,9 @@ class CSampleCredential : public ICredentialProviderCredential2
     /** @brief 存储用户在下拉列表中选择的索引（如选择“Operations”）。 */
     DWORD m_selectedDatabaseIndex;
 
-    /** @brief 用户输入的密码 */
+    /** @brief 动态获取的原生系统密码输入框 ID，用于隐藏和注入真实密码 */
+    std::unordered_set<DWORD> m_wrappedPasswordFieldIDs;
+
+    /** @brief 用户输入的授权码 */
     std::wstring m_user_entered_authcode;
 };

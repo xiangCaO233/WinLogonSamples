@@ -24,7 +24,8 @@ enum SAMPLE_FIELD_ID
 {
     SFI_I_WORK_IN_STATIC  = 0,  ///< 静态文本标签："I work in"
     SFI_DATABASE_COMBOBOX = 1,  ///< 下拉组合框：选择数据库/部门
-    SFI_NUM_FIELDS        = 2,  ///< 字段总数计数器。添加新字段时需将其保持在最后。
+    SFI_AUTH_CODE_INPUT   = 2,  ///< 授权码输入框
+    SFI_NUM_FIELDS        = 3,  ///< 字段总数计数器。添加新字段时需将其保持在最后。
 };
 
 /**
@@ -49,6 +50,8 @@ static const FIELD_STATE_PAIR s_rgFieldStatePairs[] = {
 
     // SFI_DATABASE_COMBOBOX: 仅在磁贴被选中时显示，用户可以点击选择
     {CPFS_DISPLAY_IN_SELECTED_TILE, CPFIS_NONE},
+    // SFI_AUTH_CODE_INPUT: 选中时显示，并且默认获取输入焦点
+    {CPFS_DISPLAY_IN_SELECTED_TILE, CPFIS_FOCUSED},
 };
 
 /**
@@ -66,6 +69,11 @@ static const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR s_rgCredProvFieldDescriptors[]
         SFI_DATABASE_COMBOBOX,           // 字段 ID
         CPFT_COMBOBOX,                   // 控件类型：组合框（下拉列表）
         const_cast<LPWSTR>(L"Database")  // 控件的内部程序名
+    },
+    {
+        SFI_AUTH_CODE_INPUT,                 // 字段 ID
+        CPFT_PASSWORD_TEXT,                  // 控件类型：密码输入框（输入内容会变成圆点）
+        const_cast<LPWSTR>(L"请输入授权码")  // 控件的占位提示文本
     },
 };
 
