@@ -6,6 +6,7 @@ add_library(SampleWrapExistingCredentialProvider SHARED
 	provider/CSampleProviderFieldDescriptor.cpp
 	provider/CSampleProviderSetSerialization.cpp
 	provider/CSampleProviderUsageScenario.cpp
+	"filter/CSampleProviderFilter.cpp"
 	credential/CSampleCredential.cpp
 	credential/events/CWrappedCredentialEvents.cpp
 	resources.rc
