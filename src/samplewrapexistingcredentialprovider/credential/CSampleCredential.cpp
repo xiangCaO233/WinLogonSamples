@@ -505,10 +505,10 @@ HRESULT CSampleCredential::CommandLinkClicked(__in DWORD dwFieldID)
  * 我们直接使用它的结果，让系统完成登录流程。
  */
 HRESULT CSampleCredential::GetSerialization(
-    __out CREDENTIAL_PROVIDER_GET_SERIALIZATION_RESPONSE* pcpgsr,
-    __out CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION*   pcpcs,
-    __deref_out_opt PWSTR*                                ppwszOptionalStatusText,
-    __out CREDENTIAL_PROVIDER_STATUS_ICON*                pcpsiOptionalStatusIcon)
+    __out CREDENTIAL_PROVIDER_GET_SERIALIZATION_RESPONSE* outCredentialSerializationResponse,
+    __out CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION*   outCredentialSerialization,
+    __deref_out_opt PWSTR*                                outOptionalStatusText,
+    __out CREDENTIAL_PROVIDER_STATUS_ICON*                outOptionalStatusIcon)
 {
     HRESULT hr = E_UNEXPECTED;
 
@@ -529,18 +529,20 @@ HRESULT CSampleCredential::GetSerialization(
             }
 
             // 转发请求：让原生凭据完成序列化打包
-            hr = m_wrappedCredential->GetSerialization(
-                pcpgsr, pcpcs, ppwszOptionalStatusText, pcpsiOptionalStatusIcon);
+            hr = m_wrappedCredential->GetSerialization(outCredentialSerializationResponse,
+                                                       outCredentialSerialization,
+                                                       outOptionalStatusText,
+                                                       outOptionalStatusIcon);
         }
         else
         {
             // 授权码错误，拒绝登录并提示用户
-            if (ppwszOptionalStatusText)
-                AllocateComString(L"授权码错误，请输入 1", ppwszOptionalStatusText);
-            if (pcpsiOptionalStatusIcon)
-                *pcpsiOptionalStatusIcon = CPSI_ERROR;
-            if (pcpgsr)
-                *pcpgsr =
+            if (outOptionalStatusText)
+                AllocateComString(L"授权码错误，请输入 1", outOptionalStatusText);
+            if (outOptionalStatusIcon)
+                *outOptionalStatusIcon = CPSI_ERROR;
+            if (outCredentialSerializationResponse)
+                *outCredentialSerializationResponse =
                     CPGSR_NO_CREDENTIAL_NOT_FINISHED;  // 告诉 LogonUI 凭据无效，留在登录界面不要去
                                                        // LSA 验证
 
