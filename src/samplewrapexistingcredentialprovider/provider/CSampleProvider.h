@@ -27,7 +27,7 @@ using Microsoft::WRL::ComPtr;
  * @class CSampleProvider
  * @brief 示例凭据提供程序的主控类。
  */
-class CSampleProvider : public ICredentialProvider
+class CSampleProvider : public ICredentialProvider, public ICredentialProviderSetUserArray
 {
   public:
     // --- IUnknown 接口实现 (COM 基础) ---
@@ -56,6 +56,26 @@ class CSampleProvider : public ICredentialProvider
         return cRef;
     }
 
+    // 实现 ICredentialProviderSetUserArray
+    IFACEMETHODIMP SetUserArray(__in ICredentialProviderUserArray* users) override
+    {
+        HRESULT hr = E_NOTIMPL;
+        if (m_wrappedProvider != NULL)
+        {
+            // 尝试从内置 Provider 中查询该接口
+            ICredentialProviderSetUserArray* pSetUserArray;
+            hr = m_wrappedProvider->QueryInterface(IID_PPV_ARGS(&pSetUserArray));
+            if (SUCCEEDED(hr))
+            {
+                // 关键：把系统给我们的用户列表，原封不动地转发给内置 Provider
+                hr = pSetUserArray->SetUserArray(users);
+                pSetUserArray->Release();
+
+                WriteLog(L"成功将 UserArray 转发给内置 Provider");
+            }
+        }
+        return hr;
+    }
     /**
      * @brief 接口查询。
      * @details 系统通过此方法确认该对象是否支持 ICredentialProvider 接口。
@@ -63,7 +83,8 @@ class CSampleProvider : public ICredentialProvider
     IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override
     {
         static const QITAB qit[] = {
-            QITABENT(CSampleProvider, ICredentialProvider),  // 暴露给系统的核心接口
+            QITABENT(CSampleProvider, ICredentialProvider),              // 暴露给系统的核心接口
+            QITABENT(CSampleProvider, ICredentialProviderSetUserArray),  // 新增
             {0},
         };
         return QISearch(this, qit, riid, ppv);
@@ -146,7 +167,7 @@ class CSampleProvider : public ICredentialProvider
 
   private:
     /** @brief 清理所有已创建的凭据实例。 */
-    void _CleanUpAllCredentials();
+    void CleanUpAllCredentials();
 
   private:
     LONG _cRef;  ///< COM 引用计数。
@@ -155,23 +176,17 @@ class CSampleProvider : public ICredentialProvider
     std::vector<ComPtr<CSampleCredential>> m_sample_credentials;
 
     /**
-     * @brief 凭据对象指针数组。
-     * @details 这里存放的是这个 Provider 枚举出的所有磁贴实例。
-     */
-    CSampleCredential** _rgpCredentials;
-
-    /**
      * @brief 被包装的原始提供程序。
      * @details 这是一个 Wrapper 模式的体现。我们将标准的密码提供程序封装在内。
      */
-    ICredentialProvider* _pWrappedProvider;
+    ICredentialProvider* m_wrappedProvider;
 
     /** @brief 被包装提供程序提供的凭据数量。 */
-    DWORD _dwCredentialCount;
+    DWORD m_wrappedCredentialCount;
 
     /** @brief 被包装提供程序的字段描述符数量。 */
-    DWORD _dwWrappedDescriptorCount;
+    DWORD m_wrappedDescriptorCount;
 
     /** @brief 标识是否已经处理了 SetSerialization 调用。 */
-    bool _bEnumeratedSetSerialization;
+    bool m_isEnumeratedSetSerialization;
 };

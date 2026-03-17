@@ -8,10 +8,10 @@
 HRESULT CSampleProvider::Advise(__in ICredentialProviderEvents* pcpe, __in UINT_PTR upAdviseContext)
 {
     HRESULT hr = E_UNEXPECTED;
-    if (_pWrappedProvider != NULL)
+    if (m_wrappedProvider != NULL)
     {
         // 转发给内置提供程序，以便它能触发 UI 刷新（如用户切换等事件）
-        hr = _pWrappedProvider->Advise(pcpe, upAdviseContext);
+        hr = m_wrappedProvider->Advise(pcpe, upAdviseContext);
     }
     return hr;
 }
@@ -22,9 +22,9 @@ HRESULT CSampleProvider::Advise(__in ICredentialProviderEvents* pcpe, __in UINT_
 HRESULT CSampleProvider::UnAdvise()
 {
     HRESULT hr = E_UNEXPECTED;
-    if (_pWrappedProvider != NULL)
+    if (m_wrappedProvider != NULL)
     {
-        hr = _pWrappedProvider->UnAdvise();
+        hr = m_wrappedProvider->UnAdvise();
     }
     return hr;
 }

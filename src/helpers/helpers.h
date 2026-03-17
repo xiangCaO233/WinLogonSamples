@@ -28,7 +28,12 @@
 #include <shlwapi.h>
 #pragma warning(pop)
 
+#include <map>
 #include <string>
+
+void WriteLog(const std::wstring& message);
+
+std::map<std::wstring, std::wstring> GetLocalUserSidMap();
 
 // 专门负责把 std::wstring 转换为 Windows 需要的 COM 字符串
 HRESULT AllocateComString(const std::wstring& str, PWSTR* ppout);

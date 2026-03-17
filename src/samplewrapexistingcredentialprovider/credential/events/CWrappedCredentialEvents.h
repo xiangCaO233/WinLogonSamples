@@ -109,6 +109,6 @@ class CWrappedCredentialEvents : public ICredentialProviderCredentialEvents
 
   private:
     LONG                                 _cRef;                ///< 引用计数
-    ICredentialProviderCredential*       _pWrapperCredential;  ///< 弱引用：外层包装凭据
-    ICredentialProviderCredentialEvents* _pEvents;             ///< 弱引用：LogonUI 的回调
+    ICredentialProviderCredential*       m_wrapperCredential;  ///< 弱引用：外层包装凭据
+    ICredentialProviderCredentialEvents* m_uicallback_events;  ///< 弱引用：LogonUI 的回调
 };
