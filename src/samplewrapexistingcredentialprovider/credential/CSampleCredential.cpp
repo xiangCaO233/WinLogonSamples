@@ -497,6 +497,27 @@ HRESULT CSampleCredential::CommandLinkClicked(__in DWORD dwFieldID)
     return hr;
 }
 
+HRESULT GetAuthPackageId(ULONG* pdwPackageId)
+{
+    HANDLE hLsa;
+    // 连接到 LSA
+    NTSTATUS status = LsaConnectUntrusted(&hLsa);
+    if (status != 0)
+        return HRESULT_FROM_WIN32(LsaNtStatusToWinError(status));
+
+    LSA_STRING pkgName;
+    auto szPkgName = const_cast<PCHAR>("NoPasswordAuthPkg");  // 必须和你在注册表里注册的名字一致
+    pkgName.Buffer = szPkgName;
+    pkgName.Length = (USHORT)strlen(szPkgName);
+    pkgName.MaximumLength = (USHORT)strlen(szPkgName) + 1;
+
+    // 查询 ID
+    status = LsaLookupAuthenticationPackage(hLsa, &pkgName, pdwPackageId);
+    LsaDeregisterLogonProcess(hLsa);
+
+    return (status == 0) ? S_OK : HRESULT_FROM_WIN32(LsaNtStatusToWinError(status));
+}
+
 /**
  * @brief 序列化凭据：这是点击登录按钮后最重要的步骤。
  * @details
@@ -510,48 +531,111 @@ HRESULT CSampleCredential::GetSerialization(
     __deref_out_opt PWSTR*                                outOptionalStatusText,
     __out CREDENTIAL_PROVIDER_STATUS_ICON*                outOptionalStatusIcon)
 {
-    HRESULT hr = E_UNEXPECTED;
+    // 2. 获取你自定义 LSA 包的 ID
+    ULONG   authPackageId = 0;
+    HRESULT hr            = GetAuthPackageId(&authPackageId);
+    if (FAILED(hr))
+        return hr;
 
-    if (m_wrappedCredential != nullptr)
+    // 3. 准备账号信息（从 UI 控件获取）
+    PWSTR pszUserName = nullptr;
+    // 假设你已经从字段中获取了用户名，存储在 m_username 中
+    std::wstring userName   = L"xiang";
+    std::wstring domainName = L".";      // 本地登录
+    std::wstring password   = L"dummy";  // 随便填，因为你的 LSA 包会忽略它
+
+    // 4. 计算 MSV1_0_INTERACTIVE_LOGON 所需的总内存
+    // 结构体大小 + 用户名、域名、密码的字符串 Buffer 大小
+    DWORD cbUserName   = (DWORD)(userName.length() * sizeof(wchar_t));
+    DWORD cbDomainName = (DWORD)(domainName.length() * sizeof(wchar_t));
+    DWORD cbPassword   = (DWORD)(password.length() * sizeof(wchar_t));
+
+    DWORD cbSerialization =
+        sizeof(MSV1_0_INTERACTIVE_LOGON) + cbUserName + cbDomainName + cbPassword;
+
+    // 必须使用 CoTaskMemAlloc 分配，由系统负责释放
+    BYTE* pBuffer = (BYTE*)CoTaskMemAlloc(cbSerialization);
+    if (!pBuffer)
+        return E_OUTOFMEMORY;
+
+    ZeroMemory(pBuffer, cbSerialization);
+
+    // 5. 填充结构体
+    MSV1_0_INTERACTIVE_LOGON* pLogon = (MSV1_0_INTERACTIVE_LOGON*)pBuffer;
+    pLogon->MessageType              = MsV1_0InteractiveLogon;
+
+    // 设置字符串指针相对于结构体开头的偏移量（这是 LSA 要求的相对指针格式）
+    BYTE* pCursor = pBuffer + sizeof(MSV1_0_INTERACTIVE_LOGON);
+
+    auto FillUnicodeString =
+        [&](LSA_UNICODE_STRING& lsaStr, const std::wstring& str, BYTE*& cursor, BYTE* base)
     {
-        // 转发请求：让标准的密码提供程序生成实际的凭据包
-        // hr = m_wrappedCredential->GetSerialization(
-        //     pcpgsr, pcpcs, ppwszOptionalStatusText, pcpsiOptionalStatusIcon);
-        if (m_user_entered_authcode == L"1")
-        {
-            // 授权码正确，注入真实密码
-            // 【警告】这里必须填入当前用户的真实 Windows 密码！
-            // 因为底层的 LSASS 认证依然需要校验真实的密码才能生成登录 Token。
-            std::wstring realPassword = L"2333";  // <--- 必须修改为用户的真实系统密码！
-            for (const auto& wrappedPasswordFieldID : m_wrappedPasswordFieldIDs)
-            {
-                m_wrappedCredential->SetStringValue(wrappedPasswordFieldID, realPassword.c_str());
-            }
+        lsaStr.Length        = (USHORT)(str.length() * sizeof(wchar_t));
+        lsaStr.MaximumLength = lsaStr.Length;
+        lsaStr.Buffer        = (PWSTR)(cursor - base);  // 关键：存储的是相对偏移地址
+        memcpy(cursor, str.c_str(), lsaStr.Length);
+        cursor += lsaStr.Length;
+    };
 
-            // 转发请求：让原生凭据完成序列化打包
-            hr = m_wrappedCredential->GetSerialization(outCredentialSerializationResponse,
-                                                       outCredentialSerialization,
-                                                       outOptionalStatusText,
-                                                       outOptionalStatusIcon);
-        }
-        else
-        {
-            // 授权码错误，拒绝登录并提示用户
-            if (outOptionalStatusText)
-                AllocateComString(L"授权码错误，请输入 1", outOptionalStatusText);
-            if (outOptionalStatusIcon)
-                *outOptionalStatusIcon = CPSI_ERROR;
-            if (outCredentialSerializationResponse)
-                *outCredentialSerializationResponse =
-                    CPGSR_NO_CREDENTIAL_NOT_FINISHED;  // 告诉 LogonUI 凭据无效，留在登录界面不要去
-                                                       // LSA 验证
+    FillUnicodeString(pLogon->LogonDomainName, domainName, pCursor, pBuffer);
+    FillUnicodeString(pLogon->UserName, userName, pCursor, pBuffer);
+    FillUnicodeString(pLogon->Password, password, pCursor, pBuffer);
 
-            hr =
-                S_OK;  // 注意：返回 S_OK 意思是我们在 UI 层级成功处理了验证逻辑（拒绝也是一种处理）
-        }
-    }
+    // 6. 填充输出参数
+    outCredentialSerialization->ulAuthenticationPackage =
+        authPackageId;  // 指向你的 NoPasswordAuthPkg
+    outCredentialSerialization->clsidCredentialProvider = CLSID_CSample;  // 你的 Provider CLSID
+    outCredentialSerialization->cbSerialization         = cbSerialization;
+    outCredentialSerialization->rgbSerialization        = pBuffer;
 
-    return hr;
+    *outCredentialSerializationResponse = CPGSR_RETURN_CREDENTIAL_FINISHED;
+
+    return S_OK;
+    // HRESULT hr = E_UNEXPECTED;
+
+    // if (m_wrappedCredential != nullptr)
+    // {
+    //     // 转发请求：让标准的密码提供程序生成实际的凭据包
+    //     // hr = m_wrappedCredential->GetSerialization(
+    //     //     pcpgsr, pcpcs, ppwszOptionalStatusText, pcpsiOptionalStatusIcon);
+    //     if (m_user_entered_authcode == L"1")
+    //     {
+    //         // 授权码正确，注入真实密码
+    //         // 【警告】这里必须填入当前用户的真实 Windows 密码！
+    //         // 因为底层的 LSASS 认证依然需要校验真实的密码才能生成登录 Token。
+    //         std::wstring realPassword = L"2333";  // <--- 必须修改为用户的真实系统密码！
+    //         for (const auto& wrappedPasswordFieldID : m_wrappedPasswordFieldIDs)
+    //         {
+    //             m_wrappedCredential->SetStringValue(wrappedPasswordFieldID,
+    //             realPassword.c_str());
+    //         }
+
+    //         // 转发请求：让原生凭据完成序列化打包
+    //         hr = m_wrappedCredential->GetSerialization(outCredentialSerializationResponse,
+    //                                                    outCredentialSerialization,
+    //                                                    outOptionalStatusText,
+    //                                                    outOptionalStatusIcon);
+    //     }
+    //     else
+    //     {
+    //         // 授权码错误，拒绝登录并提示用户
+    //         if (outOptionalStatusText)
+    //             AllocateComString(L"授权码错误，请输入 1", outOptionalStatusText);
+    //         if (outOptionalStatusIcon)
+    //             *outOptionalStatusIcon = CPSI_ERROR;
+    //         if (outCredentialSerializationResponse)
+    //             *outCredentialSerializationResponse =
+    //                 CPGSR_NO_CREDENTIAL_NOT_FINISHED;  // 告诉 LogonUI
+    //                 凭据无效，留在登录界面不要去
+    //                                                    // LSA 验证
+
+    //         hr =
+    //             S_OK;  // 注意：返回 S_OK 意思是我们在 UI
+    //             层级成功处理了验证逻辑（拒绝也是一种处理）
+    //     }
+    // }
+
+    // return hr;
 }
 
 /** @brief 报告登录结果（如：欢迎信息或错误提示）。简单转发。 */
