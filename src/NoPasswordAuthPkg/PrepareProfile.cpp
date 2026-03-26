@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <sspi.h>
 #include "PrepareProfile.hpp"
+#include "PrepareToken.hpp"
 #include "Utils.hpp"
 
 static LARGE_INTEGER InfiniteFuture()
@@ -20,6 +21,21 @@ static LARGE_INTEGER CurrentTime()
         .LowPart  = time.dwLowDateTime,
         .HighPart = (LONG)time.dwHighDateTime,
     };
+}
+
+// 转换wstring逻辑
+static std::wstring ToWString(const UNICODE_STRING& uniStr)
+{
+    if (uniStr.Buffer == nullptr || uniStr.Length == 0)
+    {
+        return L"";
+    }
+
+    // Length 是字节数，wchar_t 通常是 2 字节，所以字符数 = Length / 2
+    // 直接使用 (wchar_t*) 强转，因为 UNICODE_STRING 的 Buffer 本质上就是 PWSTR (wchar_t*)
+    size_t charCount = uniStr.Length / sizeof(wchar_t);
+
+    return std::wstring(uniStr.Buffer, charCount);
 }
 
 ULONG GetProfileBufferSize(const std::wstring&             computername,
@@ -80,7 +96,7 @@ std::vector<BYTE> PrepareProfileBuffer(const std::wstring&             computern
 
         offset += profile->LogonServer.MaximumLength;
     }
-    profile->UserFlags = 0;
+    profile->UserFlags = LOGON_EXTRA_SIDS;
 
     return profileBuffer;
 }

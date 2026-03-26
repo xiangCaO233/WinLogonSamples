@@ -1,5 +1,7 @@
 #include "PrepareToken.hpp"
 #include <Lm.h>
+#include <accctrl.h>
+#include <aclapi.h>
 #include "Utils.hpp"
 
 #pragma comment(lib, "Netapi32.lib")
@@ -162,14 +164,89 @@ NTSTATUS UserNameToToken(__in LSA_UNICODE_STRING*         AccountName,
 
     GetPrimaryGroupSidFromUserSid(userSid, &token->PrimaryGroup.PrimaryGroup);
 
+    // --- 1. 特权处理 (独立分配内存) ---
+    {
+        LUID_AND_ATTRIBUTES requiredPrivs[2];
+        bool                privOk = true;
+
+        if (!LookupPrivilegeValueW(nullptr, L"SeChangeNotifyPrivilege", &requiredPrivs[0].Luid))
+            privOk = false;
+        if (!LookupPrivilegeValueW(nullptr, L"SeImpersonatePrivilege", &requiredPrivs[1].Luid))
+            privOk = false;
+
+        if (privOk)
+        {
+            requiredPrivs[0].Attributes = SE_PRIVILEGE_ENABLED;
+            requiredPrivs[1].Attributes = SE_PRIVILEGE_ENABLED;
+
+            // 分配内存：sizeof(TOKEN_PRIVILEGES) 已经包含了一个 LUID_AND_ATTRIBUTES
+            DWORD privSize = sizeof(TOKEN_PRIVILEGES) + (2 - 1) * sizeof(LUID_AND_ATTRIBUTES);
+            TOKEN_PRIVILEGES* pPrivs = (TOKEN_PRIVILEGES*)FunctionTable.AllocateLsaHeap(privSize);
+
+            if (pPrivs)
+            {
+                pPrivs->PrivilegeCount = 2;
+                memcpy(pPrivs->Privileges, requiredPrivs, sizeof(requiredPrivs));
+                token->Privileges = pPrivs;
+            }
+        }
+        else
+        {
+            LogMessage("Error: LookupPrivilegeValueW failed");
+            token->Privileges = nullptr;
+        }
+    }
+
     // TOKEN_PRIVILEGES Privileges not currently configured
-    token->Privileges = nullptr;
+    // token->Privileges = nullptr;
 
+    // --- 2. 所有者处理 (必须 Deep Copy，严禁直接赋值指针) ---
+    {
+        DWORD sidLen       = GetLengthSid(userSid);
+        token->Owner.Owner = (PSID)FunctionTable.AllocateLsaHeap(sidLen);
+        if (token->Owner.Owner)
+        {
+            CopySid(sidLen, token->Owner.Owner, userSid);
+        }
+    }
     // PSID Owner not currently configured
-    token->Owner.Owner = (PSID) nullptr;
+    // token->Owner.Owner = (PSID) nullptr;
 
+    // 3. 设置 DefaultDacl (核心中的核心)
+    // 这个 DACL 至少要允许用户自己拥有全权，允许系统 (SYSTEM) 拥有全权
+    PACL             pDacl = NULL;
+    EXPLICIT_ACCESSW ea[2] = {};
+
+    // 允许用户自己
+    ea[0].grfAccessPermissions = GENERIC_ALL;
+    ea[0].grfAccessMode        = SET_ACCESS;
+    ea[0].grfInheritance       = NO_INHERITANCE;
+    ea[0].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+    ea[0].Trustee.ptstrName    = (LPWSTR)userSid;
+
+    // 允许 SYSTEM 组
+    PSID                     systemSid = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuth    = SECURITY_NT_AUTHORITY;
+    AllocateAndInitializeSid(
+        &ntAuth, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0, &systemSid);
+
+    ea[1].grfAccessPermissions = GENERIC_ALL;
+    ea[1].grfAccessMode        = SET_ACCESS;
+    ea[1].grfInheritance       = NO_INHERITANCE;
+    ea[1].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+    ea[1].Trustee.ptstrName    = (LPWSTR)systemSid;
+
+    SetEntriesInAclW(2, ea, NULL, &pDacl);
+
+    // 拷贝到 LSA 堆
+    DWORD daclSize                 = pDacl->AclSize;
+    token->DefaultDacl.DefaultDacl = (PACL)FunctionTable.AllocateLsaHeap(daclSize);
+    memcpy(token->DefaultDacl.DefaultDacl, pDacl, daclSize);
+
+    LocalFree(pDacl);
+    FreeSid(systemSid);
     // PACL DefaultDacl not currently configured
-    token->DefaultDacl.DefaultDacl = nullptr;
+    // token->DefaultDacl.DefaultDacl = nullptr;
 
     // assign outputs
     *Token     = token;
