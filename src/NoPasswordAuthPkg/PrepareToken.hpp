@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // 1. 先包含 windows.h，但告诉它不要定义状态码
 #define WIN32_NO_STATUS
@@ -15,5 +15,7 @@
 #include <ntsecpkg.h>
 
 
+// PrepareToken.hpp
 NTSTATUS UserNameToToken(__in LSA_UNICODE_STRING*         AccountName,
+                         __in LUID*                       LogonId,  // 新增参数
                          __out LSA_TOKEN_INFORMATION_V1** Token, __out PNTSTATUS SubStatus);

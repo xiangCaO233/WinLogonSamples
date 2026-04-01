@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file guid.cpp
  * @brief 实例化 GUID。
  *

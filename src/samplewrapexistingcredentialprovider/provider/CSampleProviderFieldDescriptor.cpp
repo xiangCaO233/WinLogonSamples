@@ -1,4 +1,4 @@
-#include "CSampleProvider.h"
+﻿#include "CSampleProvider.h"
 
 /**
  * @brief 获取总的 UI 字段数量。

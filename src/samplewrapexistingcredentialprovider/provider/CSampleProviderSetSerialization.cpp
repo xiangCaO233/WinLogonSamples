@@ -1,4 +1,4 @@
-#include "CSampleProvider.h"
+﻿#include "CSampleProvider.h"
 
 /**
  * @brief 设置序列化数据（转发给内置提供程序）。

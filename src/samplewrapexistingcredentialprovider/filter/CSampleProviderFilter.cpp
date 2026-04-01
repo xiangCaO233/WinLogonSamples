@@ -1,4 +1,4 @@
-#include "CSampleProviderFilter.h"
+﻿#include "CSampleProviderFilter.h"
 
 IFACEMETHODIMP CSampleFilter::Filter(__in CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
                                      __in DWORD                              dwFlags,

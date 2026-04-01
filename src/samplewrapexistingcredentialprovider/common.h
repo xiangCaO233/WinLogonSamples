@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file common.h
  * @brief 定义凭据提供程序的 UI 字段布局和静态数据。
  *
@@ -52,39 +52,4 @@ static const FIELD_STATE_PAIR s_rgFieldStatePairs[] = {
     {CPFS_DISPLAY_IN_SELECTED_TILE, CPFIS_NONE},
     // SFI_AUTH_CODE_INPUT: 选中时显示，并且默认获取输入焦点
     {CPFS_DISPLAY_IN_SELECTED_TILE, CPFIS_FOCUSED},
-};
-
-/**
- * @var s_rgCredProvFieldDescriptors
- * @brief 控件描述符数组。
- * @details 定义了每个控件的类型和名称。Windows 通过这个表来构建 UI。
- */
-static const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR s_rgCredProvFieldDescriptors[] = {
-    {
-        SFI_I_WORK_IN_STATIC,           // 字段 ID
-        CPFT_SMALL_TEXT,                // 控件类型：小文本域
-        const_cast<LPWSTR>(L"IWorkIn")  // 控件的内部程序名（非显示文本）
-    },
-    {
-        SFI_DATABASE_COMBOBOX,           // 字段 ID
-        CPFT_COMBOBOX,                   // 控件类型：组合框（下拉列表）
-        const_cast<LPWSTR>(L"Database")  // 控件的内部程序名
-    },
-    {
-        SFI_AUTH_CODE_INPUT,                 // 字段 ID
-        CPFT_PASSWORD_TEXT,                  // 控件类型：密码输入框（输入内容会变成圆点）
-        const_cast<LPWSTR>(L"请输入授权码")  // 控件的占位提示文本
-    },
-};
-
-/**
- * @var s_rgDatabases
- * @brief 下拉框的内容数据。
- * @details 这是一个静态模拟数据库，用户在组合框中看到并选择这些选项。
- */
-static const PWSTR s_rgDatabases[] = {
-    const_cast<PWSTR>(L"Operations"),       // 运营部
-    const_cast<PWSTR>(L"Human Resources"),  // 人力资源部
-    const_cast<PWSTR>(L"Sales"),            // 销售部
-    const_cast<PWSTR>(L"Finance"),          // 财务部
 };

@@ -1,4 +1,4 @@
-#include "PrepareToken.hpp"
+﻿#include "PrepareToken.hpp"
 #include "PrepareProfile.hpp"
 #include "Utils.hpp"
 
@@ -146,27 +146,27 @@ NTSTATUS LsaApLogonUser(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ SECURITY_LO
 
     // assign output arguments
 
+
+    wchar_t computerName[MAX_COMPUTERNAME_LENGTH + 1] = {};
+    DWORD   computerNameSize                          = ARRAYSIZE(computerName);
+    if (!GetComputerNameW(computerName, &computerNameSize))
     {
-        wchar_t computerName[MAX_COMPUTERNAME_LENGTH + 1] = {};
-        DWORD   computerNameSize                          = ARRAYSIZE(computerName);
-        if (!GetComputerNameW(computerName, &computerNameSize))
-        {
-            LogMessage("  return STATUS_INTERNAL_ERROR (GetComputerNameW failed)");
-            return STATUS_INTERNAL_ERROR;
-        }
-
-        // assign "ProfileBuffer" output argument
-        *ProfileBufferSize = GetProfileBufferSize(computerName, *logonInfo);
-        FunctionTable.AllocateClientBuffer(
-            ClientRequest, *ProfileBufferSize, ProfileBuffer);  // will update *ProfileBuffer
-
-        std::vector<BYTE> profileBuffer =
-            PrepareProfileBuffer(computerName, *logonInfo, (BYTE*)*ProfileBuffer);
-        FunctionTable.CopyToClientBuffer(ClientRequest,
-                                         (ULONG)profileBuffer.size(),
-                                         *ProfileBuffer,
-                                         profileBuffer.data());  // copy to caller process
+        LogMessage("  return STATUS_INTERNAL_ERROR (GetComputerNameW failed)");
+        return STATUS_INTERNAL_ERROR;
     }
+
+    // assign "ProfileBuffer" output argument
+    *ProfileBufferSize = GetProfileBufferSize(computerName, *logonInfo);
+    FunctionTable.AllocateClientBuffer(
+        ClientRequest, *ProfileBufferSize, ProfileBuffer);  // will update *ProfileBuffer
+
+    std::vector<BYTE> profileBuffer =
+        PrepareProfileBuffer(computerName, *logonInfo, (BYTE*)*ProfileBuffer);
+    FunctionTable.CopyToClientBuffer(ClientRequest,
+                                     (ULONG)profileBuffer.size(),
+                                     *ProfileBuffer,
+                                     profileBuffer.data());  // copy to caller process
+
 
     {
         // assign "LogonId" output argument
@@ -189,9 +189,13 @@ NTSTATUS LsaApLogonUser(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ SECURITY_LO
 
     {
         // Assign "TokenInformation" output argument
-        LSA_TOKEN_INFORMATION_V2* tokenInfo = nullptr;
+        LSA_TOKEN_INFORMATION_V1* tokenInfo = nullptr;
         NTSTATUS                  subStatus = 0;
-        NTSTATUS status = UserNameToToken(&logonInfo->UserName, &tokenInfo, &subStatus);
+
+        // 关键修改：传入 &LogonId
+        NTSTATUS status = UserNameToToken(
+            &logonInfo->UserName, LogonId, (LSA_TOKEN_INFORMATION_V1**)&tokenInfo, &subStatus);
+
         if (status != STATUS_SUCCESS)
         {
             LogMessage("ERROR: UserNameToToken failed with err: 0x%x", status);
@@ -210,28 +214,17 @@ NTSTATUS LsaApLogonUser(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ SECURITY_LO
                                               logonInfo->UserName.Length);  // mandatory
     }
 
+    // 8. 设置 AccountName（必须从 LSA 堆分配）
+    *AccountName = CreateLsaUnicodeString(logonInfo->UserName.Buffer, logonInfo->UserName.Length);
+
+    // 9. 设置 AuthenticatingAuthority (解决注销崩溃的关键！)
     if (AuthenticatingAuthority)
     {
-        // assign "AuthenticatingAuthority" output argument
+        // 核心修改点：对于本地账户，这个值必须是计算机名。
+        // 如果设置为 "." 或空，第二次登录时 ProfSvc 会因为 SID 校验失败而崩溃。
+        LogMessage("  Setting AuthenticatingAuthority to: %ls", computerName);
         *AuthenticatingAuthority =
-            (LSA_UNICODE_STRING*)FunctionTable.AllocateLsaHeap(sizeof(LSA_UNICODE_STRING));
-
-        if (logonInfo->LogonDomainName.Length > 0)
-        {
-            LogMessage("  AuthenticatingAuthority: %ls",
-                       ToWstring(logonInfo->LogonDomainName).c_str());
-            *AuthenticatingAuthority = CreateLsaUnicodeString(logonInfo->LogonDomainName.Buffer,
-                                                              logonInfo->LogonDomainName.Length);
-        }
-        else
-        {
-            LogMessage("  AuthenticatingAuthority: <empty>");
-            **AuthenticatingAuthority = {
-                .Length        = 0,
-                .MaximumLength = 0,
-                .Buffer        = nullptr,
-            };
-        }
+            CreateLsaUnicodeString(computerName, (USHORT)(wcslen(computerName) * sizeof(wchar_t)));
     }
 
     LogMessage("  return STATUS_SUCCESS");

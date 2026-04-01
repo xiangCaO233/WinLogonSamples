@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file CSampleCredential.cpp
  * @brief 磁贴实例的逻辑实现。
  *
@@ -20,6 +20,7 @@
 #include "CSampleCredential.h"
 #include "events/CWrappedCredentialEvents.h"
 #include "guid.h"
+#include "helpers.h"
 
 const std::vector<std::wstring> CSampleCredential::s_comboBoxDatabases{
     L"Operations",       // 运营部
@@ -58,6 +59,8 @@ CSampleCredential::~CSampleCredential()
 
     DllRelease();  // 减少 DLL 引用计数
 }
+
+#ifndef BUILD_FOR_WIN7
 IFACEMETHODIMP CSampleCredential::GetUserSid(__deref_out PWSTR* outUserSid)
 {
     *outUserSid = nullptr;
@@ -74,12 +77,15 @@ IFACEMETHODIMP CSampleCredential::GetUserSid(__deref_out PWSTR* outUserSid)
     }
     return E_NOTIMPL;
 }
+#endif
 
 IFACEMETHODIMP CSampleCredential::QueryInterface(__in REFIID riid, __deref_out void** ppv)
 {
     static const QITAB qit[] = {
         QITABENT(CSampleCredential, ICredentialProviderCredential),
+#ifndef BUILD_FOR_WIN7
         QITABENT(CSampleCredential, ICredentialProviderCredential2),
+#endif
         {0},
     };
     return QISearch(this, qit, riid, ppv);
@@ -147,6 +153,25 @@ HRESULT CSampleCredential::Initialize(__in const CREDENTIAL_PROVIDER_FIELD_DESCR
     {
         // 这里的 L"Database" 是程序内部标识，UI 显示内容在 GetComboBoxValueAt 中处理
         m_field_current_texts[SFI_DATABASE_COMBOBOX] = L"Database";
+    }
+
+    // 尝试获取用户名（在系统密码 Provider 中，用户名通常在某个固定的 Field ID）
+    // 注意：这需要你先通过 m_wrappedProvider->GetFieldDescriptorAt 找到类型为 CPFT_EDIT_TEXT 或
+    // CPFT_STATIC_TEXT 的字段
+    PWSTR field_val = nullptr;
+    // 假设 ID 0 或 1 是用户名，这取决于具体的场景（登录 vs 解锁）
+    hr = m_wrappedCredential->GetStringValue(0, &field_val);
+    if (SUCCEEDED(hr))
+    {
+        WriteLog(L"field0 val:" + std::wstring(field_val));
+        CoTaskMemFree(field_val);
+    }
+    // 假设 ID 0 或 1 是用户名，这取决于具体的场景（登录 vs 解锁）
+    hr = m_wrappedCredential->GetStringValue(1, &field_val);
+    if (SUCCEEDED(hr))
+    {
+        WriteLog(L"field1 val:" + std::wstring(field_val));
+        CoTaskMemFree(field_val);
     }
 
     return hr;

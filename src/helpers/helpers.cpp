@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file helpers.cpp
  * @brief 凭据提供程序辅助函数实现。
  *
@@ -19,6 +19,14 @@
 
 void WriteLog(const std::wstring& message)
 {
+    // 使用简单的 C 风格文件操作，兼容性最强
+    // 写入到 C:\Windows\Temp，因为 LogonUI (SYSTEM权限) 肯定有权写这里
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, L"C:\\Windows\\Temp\\CP_Debug.log", L"a+, ccs=UTF-16LE") == 0)
+    {
+        fwprintf(fp, L"%ls\n", message.c_str());
+        fclose(fp);
+    }
     OutputDebugStringW((L"[SampleCP] " + message + L"\n").c_str());
 }
 

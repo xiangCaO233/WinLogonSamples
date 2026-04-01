@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file CWrappedCredentialEvents.h
  * @brief 凭据事件中继器类定义。
  *

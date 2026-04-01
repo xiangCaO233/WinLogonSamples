@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file resources.rc
  * @brief 资源脚本文件。
  * @details 此文件告诉资源编译器（RC.exe）将哪些物理文件打包进 DLL 内部。

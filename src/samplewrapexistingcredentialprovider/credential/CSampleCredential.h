@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file CSampleCredential.h
  * @brief 凭据磁贴实例类定义。
  *
@@ -21,7 +21,12 @@
 #include "resource.h"
 #include "events/CWrappedCredentialEvents.h"  // 用于包装事件回调的转换器
 
-class CSampleCredential : public ICredentialProviderCredential2
+class CSampleCredential :
+#ifdef BUILD_FOR_WIN7
+    public ICredentialProviderCredential
+#else
+    public ICredentialProviderCredential2
+#endif
 {
   public:
     // --- IUnknown 接口实现 (COM 基础) ---
@@ -41,7 +46,9 @@ class CSampleCredential : public ICredentialProviderCredential2
         return cRef;
     }
 
+#ifndef BUILD_FOR_WIN7
     IFACEMETHODIMP GetUserSid(__deref_out PWSTR* ppwszUserSid) override;
+#endif
 
     IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override;
 

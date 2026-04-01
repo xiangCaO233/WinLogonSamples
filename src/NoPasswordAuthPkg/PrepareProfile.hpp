@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <vector>
 #include <NTSecAPI.h>  // for MSV1_0_INTERACTIVE_LOGON

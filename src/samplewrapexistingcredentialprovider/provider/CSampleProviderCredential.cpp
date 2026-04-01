@@ -1,4 +1,5 @@
-#include "CSampleProvider.h"
+﻿#include "CSampleProvider.h"
+#include "helpers.h"
 #include <string>
 #include <unordered_set>
 
@@ -53,9 +54,12 @@ HRESULT CSampleProvider::GetCredentialCount(__out DWORD*                     pdw
                     CoTaskMemFree(pswdFieldDescriptor);
                 }
             }
-            // 2. 核心：获取内置提供程序的磁贴数量（例如：找到了 3 个用户）
+            // 2. 获取内置提供程序的磁贴数量（例如：找到了 3 个用户）
             hr = m_wrappedProvider->GetCredentialCount(
                 &(m_wrappedCredentialCount), &(dwDefault), &(bAutoLogonWithDefault));
+
+            WriteLog(L"Get " + std::to_wstring(m_wrappedCredentialCount) +
+                     L" Wrapped Credentials.");
 
             if (SUCCEEDED(hr))
             {

@@ -1,15 +1,13 @@
-#include <Windows.h>
+﻿#include <Windows.h>
 #include <sspi.h>
 #include "PrepareProfile.hpp"
-#include "PrepareToken.hpp"
 #include "Utils.hpp"
 
 static LARGE_INTEGER InfiniteFuture()
 {
-    LARGE_INTEGER val{
-        .LowPart  = 0xFFFFFFFF,  // unsigned
-        .HighPart = 0x7FFFFFFF,  // signed
-    };
+    LARGE_INTEGER val;
+    val.LowPart  = 0xFFFFFFFF;
+    val.HighPart = 0x7FFFFFFF;
     return val;
 }
 
@@ -17,10 +15,10 @@ static LARGE_INTEGER CurrentTime()
 {
     FILETIME time{};
     GetSystemTimeAsFileTime(&time);
-    return LARGE_INTEGER{
-        .LowPart  = time.dwLowDateTime,
-        .HighPart = (LONG)time.dwHighDateTime,
-    };
+    LARGE_INTEGER ret;
+    ret.LowPart  = time.dwLowDateTime;
+    ret.HighPart = (LONG)time.dwHighDateTime;
+    return ret;
 }
 
 // 转换wstring逻辑
@@ -70,11 +68,10 @@ std::vector<BYTE> PrepareProfileBuffer(const std::wstring&             computern
                /*src*/ logonInfo.UserName.Buffer,
                logonInfo.UserName.MaximumLength);
 
-        LSA_UNICODE_STRING tmp = {
-            .Length        = logonInfo.UserName.Length,
-            .MaximumLength = logonInfo.UserName.MaximumLength,
-            .Buffer        = (wchar_t*)(hostProfileAddress + offset),
-        };
+        LSA_UNICODE_STRING tmp;
+        tmp.Length        = logonInfo.UserName.Length;
+        tmp.MaximumLength = logonInfo.UserName.MaximumLength;
+        tmp.Buffer        = (wchar_t*)(hostProfileAddress + offset);
         profile->FullName = tmp;
 
         offset += profile->FullName.MaximumLength;
@@ -87,16 +84,16 @@ std::vector<BYTE> PrepareProfileBuffer(const std::wstring&             computern
                /*src*/ computername.data(),
                computername.size());
 
-        LSA_UNICODE_STRING tmp = {
-            .Length        = (USHORT)(2 * computername.size()),
-            .MaximumLength = (USHORT)(2 * computername.size()),
-            .Buffer        = (wchar_t*)(hostProfileAddress + offset),
-        };
+        LSA_UNICODE_STRING tmp;
+        tmp.Length        = (USHORT)(2 * computername.size());
+        tmp.MaximumLength = (USHORT)(2 * computername.size());
+        tmp.Buffer        = (wchar_t*)(hostProfileAddress + offset);
+
         profile->LogonServer = tmp;
 
         offset += profile->LogonServer.MaximumLength;
     }
-    profile->UserFlags = LOGON_EXTRA_SIDS;
+    profile->UserFlags = 0;
 
     return profileBuffer;
 }

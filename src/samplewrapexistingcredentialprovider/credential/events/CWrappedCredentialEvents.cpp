@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file CWrappedCredentialEvents.cpp
  * @brief 凭据事件中继器实现。
  */

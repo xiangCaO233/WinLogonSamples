@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file Dll.cpp
  * @brief 标准 COM DLL 入口点与类工厂（Class Factory）实现。
  *
@@ -12,6 +12,7 @@
 #include <unknwn.h>  // 定义 IUnknown, IClassFactory
 #include "Dll.h"
 #include "helpers.h"
+#include "Utilities.h"
 
 /** @brief DLL 全局引用计数。由 DllCanUnloadNow 检查。 */
 static LONG g_cRef = 0;
@@ -54,6 +55,7 @@ class CClassFactory : public IClassFactory
      */
     IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv)
     {
+        WriteLog(L"DLL QueryInterface Called");
         // QITAB 表驱动的接口查询，使代码更简洁
         static const QITAB qit[] = {
             QITABENT(CClassFactory, IClassFactory),
@@ -94,6 +96,7 @@ class CClassFactory : public IClassFactory
     IFACEMETHODIMP CreateInstance(__in IUnknown* pUnkOuter, __in REFIID riid,
                                   __deref_out void** ppv)
     {
+        WriteLog(L"DLL CreateInstance Called");
         HRESULT hr;
         if (!pUnkOuter)
         {
@@ -115,6 +118,7 @@ class CClassFactory : public IClassFactory
      */
     IFACEMETHODIMP LockServer(__in BOOL bLock)
     {
+        WriteLog(L"DLL LockServer Called");
         if (bLock)
         {
             DllAddRef();
@@ -144,6 +148,7 @@ class CClassFactory : public IClassFactory
  */
 HRESULT CClassFactory_CreateInstance(__in REFCLSID rclsid, __in REFIID riid, __deref_out void** ppv)
 {
+    WriteLog(L"DLL CClassFactory_CreateInstance Called");
     *ppv = NULL;
     HRESULT hr;
 
@@ -190,7 +195,7 @@ void DllRelease()
  */
 STDAPI DllCanUnloadNow()
 {
-    return (g_cRef > 0) ? S_FALSE : S_OK;
+    return (g_cRef > 1) ? S_FALSE : S_OK;
 }
 
 /**
@@ -200,6 +205,7 @@ STDAPI DllCanUnloadNow()
  */
 STDAPI DllGetClassObject(__in REFCLSID rclsid, __in REFIID riid, __deref_out void** ppv)
 {
+    WriteLog(L"DLL DllGetClassObject Called");
     return CClassFactory_CreateInstance(rclsid, riid, ppv);
 }
 
@@ -210,6 +216,7 @@ STDAPI DllGetClassObject(__in REFCLSID rclsid, __in REFIID riid, __deref_out voi
  */
 STDAPI_(BOOL) DllMain(__in HINSTANCE hinstDll, __in DWORD dwReason, __in void*)
 {
+    WriteLog(L"DLL DllMain Called");
     switch (dwReason)
     {
     case DLL_PROCESS_ATTACH:

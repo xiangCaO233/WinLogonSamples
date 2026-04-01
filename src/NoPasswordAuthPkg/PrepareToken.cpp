@@ -1,4 +1,4 @@
-#include "PrepareToken.hpp"
+﻿#include "PrepareToken.hpp"
 #include <Lm.h>
 #include <accctrl.h>
 #include <aclapi.h>
@@ -89,166 +89,257 @@ static bool GetLocalGroups(const wchar_t* UserName, GROUP_USERS_INFO_0** lpGroup
     return true;
 }
 
-
-NTSTATUS UserNameToToken(__in LSA_UNICODE_STRING*         AccountName,
+NTSTATUS UserNameToToken(__in LSA_UNICODE_STRING* AccountName,
+                         __in LUID* LogonId,  // 必须传入 LsaApLogonUser 生成的 LogonId
                          __out LSA_TOKEN_INFORMATION_V1** Token, __out PNTSTATUS SubStatus)
 {
-    const LARGE_INTEGER Forever{
-        .LowPart  = 0xFFFFFFFF,  // unsigned
-        .HighPart = 0x7FFFFFFF,  // signed
-    };
-
-    // convert username to zero-terminated string
+    LARGE_INTEGER Forever;
+    Forever.LowPart       = 0xFFFFFFFF;
+    Forever.HighPart      = 0x7FFFFFFF;
     std::wstring username = ToWstring(*AccountName);
 
     auto* token =
         (LSA_TOKEN_INFORMATION_V1*)FunctionTable.AllocateLsaHeap(sizeof(LSA_TOKEN_INFORMATION_V1));
+    if (!token)
+        return STATUS_INSUFFICIENT_RESOURCES;
 
     token->ExpirationTime = Forever;
 
+    // 1. 获取 User SID
     PSID userSid = nullptr;
-    {
-        // configure "User"
-        if (!NameToSid(username.c_str(), &userSid))
-            return STATUS_FAIL_FAST_EXCEPTION;
+    if (!NameToSid(username.c_str(), &userSid))
+        return STATUS_FAIL_FAST_EXCEPTION;
+    token->User.User.Sid        = userSid;
+    token->User.User.Attributes = 0;
 
-        LogMessage("  User.User: %ls", username.c_str());
-        token->User.User = {
-            .Sid        = userSid,
-            .Attributes = 0,
-        };
-    }
-
+    // 2. 处理组信息 (关键：包含 Logon SID)
     {
-        // configure "Groups"
         DWORD               NumberOfGroups = 0;
         GROUP_USERS_INFO_1* pGroupInfo     = nullptr;
-        if (!GetGroups(username.c_str(), &pGroupInfo, &NumberOfGroups))
-        {
-            return STATUS_FAIL_FAST_EXCEPTION;
-        }
-        LogMessage("  NumberOfGroups: %u", NumberOfGroups);
+        GetGroups(username.c_str(), &pGroupInfo, &NumberOfGroups);
 
         DWORD               NumberOfLocalGroups = 0;
         GROUP_USERS_INFO_0* pLocalGroupInfo     = nullptr;
-        if (!GetLocalGroups(username.c_str(), &pLocalGroupInfo, &NumberOfLocalGroups))
-        {
-            return STATUS_FAIL_FAST_EXCEPTION;
-        }
-        LogMessage("  NumberOfLocalGroups: %u", NumberOfLocalGroups);
+        GetLocalGroups(username.c_str(), &pLocalGroupInfo, &NumberOfLocalGroups);
+
+        // 我们现在需要 9 个额外组
+        // 1-8: 你之前定义的那些
+        // 9: Logon SID (S-1-5-5-X-Y)
+        DWORD ExtraGroups = 9;
+        DWORD TotalGroups = NumberOfGroups + NumberOfLocalGroups + ExtraGroups;
 
         TOKEN_GROUPS* tokenGroups = (TOKEN_GROUPS*)FunctionTable.AllocateLsaHeap(
-            FIELD_OFFSET(TOKEN_GROUPS, Groups[NumberOfGroups + NumberOfLocalGroups]));
-        tokenGroups->GroupCount = NumberOfGroups + NumberOfLocalGroups;
-        for (size_t i = 0; i < NumberOfGroups; i++)
+            FIELD_OFFSET(TOKEN_GROUPS, Groups[TotalGroups]));
+        if (!tokenGroups)
+            return STATUS_INSUFFICIENT_RESOURCES;
+
+        DWORD currentIdx = 0;
+
+        // 拷贝本地和域组
+        for (DWORD i = 0; i < NumberOfGroups; i++)
         {
-            NameToSid(pGroupInfo[i].grui1_name, &tokenGroups->Groups[i].Sid);
-
-            tokenGroups->Groups[i].Attributes = pGroupInfo[i].grui1_attributes;
-        }
-        for (size_t i = 0; i < NumberOfLocalGroups; i++)
-        {
-            NameToSid(pLocalGroupInfo[i].grui0_name, &tokenGroups->Groups[NumberOfGroups + i].Sid);
-
-            // get the attributes of group since pLocalGroupInfo doesn't contain attributes
-            if (*GetSidSubAuthority(tokenGroups->Groups[NumberOfGroups + i].Sid, 0) !=
-                SECURITY_BUILTIN_DOMAIN_RID)
-                tokenGroups->Groups[NumberOfGroups + i].Attributes =
-                    SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT;
-            else
-                tokenGroups->Groups[NumberOfGroups + i].Attributes = 0;
-        }
-
-        token->Groups = tokenGroups;
-    }
-
-    GetPrimaryGroupSidFromUserSid(userSid, &token->PrimaryGroup.PrimaryGroup);
-
-    // --- 1. 特权处理 (独立分配内存) ---
-    {
-        LUID_AND_ATTRIBUTES requiredPrivs[2];
-        bool                privOk = true;
-
-        if (!LookupPrivilegeValueW(nullptr, L"SeChangeNotifyPrivilege", &requiredPrivs[0].Luid))
-            privOk = false;
-        if (!LookupPrivilegeValueW(nullptr, L"SeImpersonatePrivilege", &requiredPrivs[1].Luid))
-            privOk = false;
-
-        if (privOk)
-        {
-            requiredPrivs[0].Attributes = SE_PRIVILEGE_ENABLED;
-            requiredPrivs[1].Attributes = SE_PRIVILEGE_ENABLED;
-
-            // 分配内存：sizeof(TOKEN_PRIVILEGES) 已经包含了一个 LUID_AND_ATTRIBUTES
-            DWORD privSize = sizeof(TOKEN_PRIVILEGES) + (2 - 1) * sizeof(LUID_AND_ATTRIBUTES);
-            TOKEN_PRIVILEGES* pPrivs = (TOKEN_PRIVILEGES*)FunctionTable.AllocateLsaHeap(privSize);
-
-            if (pPrivs)
+            if (NameToSid(pGroupInfo[i].grui1_name, &tokenGroups->Groups[currentIdx].Sid))
             {
-                pPrivs->PrivilegeCount = 2;
-                memcpy(pPrivs->Privileges, requiredPrivs, sizeof(requiredPrivs));
-                token->Privileges = pPrivs;
+                tokenGroups->Groups[currentIdx].Attributes =
+                    SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT;
+                currentIdx++;
             }
         }
-        else
+        for (DWORD i = 0; i < NumberOfLocalGroups; i++)
         {
-            LogMessage("Error: LookupPrivilegeValueW failed");
-            token->Privileges = nullptr;
+            if (NameToSid(pLocalGroupInfo[i].grui0_name, &tokenGroups->Groups[currentIdx].Sid))
+            {
+                tokenGroups->Groups[currentIdx].Attributes =
+                    SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT;
+                currentIdx++;
+            }
         }
+
+        SID_IDENTIFIER_AUTHORITY ntAuth        = SECURITY_NT_AUTHORITY;
+        SID_IDENTIFIER_AUTHORITY worldAuth     = SECURITY_WORLD_SID_AUTHORITY;
+        SID_IDENTIFIER_AUTHORITY localAuth     = SECURITY_LOCAL_SID_AUTHORITY;
+        SID_IDENTIFIER_AUTHORITY integrityAuth = SECURITY_MANDATORY_LABEL_AUTHORITY;
+
+        auto AddWellKnownSid =
+            [&](SID_IDENTIFIER_AUTHORITY& auth, BYTE subCount, DWORD rid1, DWORD rid2, DWORD attr)
+        {
+            PSID pSidTemp = nullptr;
+            if (AllocateAndInitializeSid(&auth, subCount, rid1, rid2, 0, 0, 0, 0, 0, 0, &pSidTemp))
+            {
+                DWORD sidLen                        = GetLengthSid(pSidTemp);
+                tokenGroups->Groups[currentIdx].Sid = FunctionTable.AllocateLsaHeap(sidLen);
+                if (tokenGroups->Groups[currentIdx].Sid)
+                {
+                    CopySid(sidLen, tokenGroups->Groups[currentIdx].Sid, pSidTemp);
+                    tokenGroups->Groups[currentIdx].Attributes = attr;
+                    currentIdx++;
+                }
+                FreeSid(pSidTemp);
+            }
+        };
+
+        // --- 添加 Logon SID (核心修复) ---
+        // 格式：S-1-5-5-LogonIdHigh-LogonIdLow
+        PSID pLogonSidTemp = nullptr;
+        if (AllocateAndInitializeSid(&ntAuth,
+                                     3,
+                                     SECURITY_LOGON_IDS_RID,
+                                     LogonId->HighPart,
+                                     LogonId->LowPart,
+                                     0,
+                                     0,
+                                     0,
+                                     0,
+                                     0,
+                                     &pLogonSidTemp))
+        {
+            DWORD sidLen                        = GetLengthSid(pLogonSidTemp);
+            tokenGroups->Groups[currentIdx].Sid = FunctionTable.AllocateLsaHeap(sidLen);
+            if (tokenGroups->Groups[currentIdx].Sid)
+            {
+                CopySid(sidLen, tokenGroups->Groups[currentIdx].Sid, pLogonSidTemp);
+                // Logon SID 必须具备 SE_GROUP_LOGON_ID 属性
+                tokenGroups->Groups[currentIdx].Attributes = SE_GROUP_ENABLED |
+                                                             SE_GROUP_ENABLED_BY_DEFAULT |
+                                                             SE_GROUP_MANDATORY | SE_GROUP_LOGON_ID;
+                currentIdx++;
+            }
+            FreeSid(pLogonSidTemp);
+        }
+
+        // 添加其他必要组
+        AddWellKnownSid(ntAuth,
+                        1,
+                        SECURITY_AUTHENTICATED_USER_RID,
+                        0,
+                        SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);
+        AddWellKnownSid(worldAuth,
+                        1,
+                        SECURITY_WORLD_RID,
+                        0,
+                        SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);
+        AddWellKnownSid(ntAuth,
+                        1,
+                        SECURITY_INTERACTIVE_RID,
+                        0,
+                        SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);
+        AddWellKnownSid(localAuth,
+                        1,
+                        SECURITY_LOCAL_RID,
+                        0,
+                        SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);
+        AddWellKnownSid(ntAuth,
+                        1,
+                        SECURITY_THIS_ORGANIZATION_RID,
+                        0,
+                        SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);
+        AddWellKnownSid(
+            ntAuth,
+            1,
+            113,
+            0,
+            SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);  // Local Account
+        AddWellKnownSid(integrityAuth,
+                        1,
+                        SECURITY_MANDATORY_MEDIUM_RID,
+                        0,
+                        SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED);
+        AddWellKnownSid(ntAuth,
+                        2,
+                        SECURITY_BUILTIN_DOMAIN_RID,
+                        DOMAIN_ALIAS_RID_USERS,
+                        SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY);
+
+        tokenGroups->GroupCount = currentIdx;
+        token->Groups           = tokenGroups;
     }
 
-    // TOKEN_PRIVILEGES Privileges not currently configured
-    // token->Privileges = nullptr;
+    // 3. 设置 Primary Group (Users)
+    GetPrimaryGroupSidFromUserSid(userSid, &token->PrimaryGroup.PrimaryGroup);
 
-    // --- 2. 所有者处理 (必须 Deep Copy，严禁直接赋值指针) ---
+    // 4. 特权处理 (补全标准用户特权)
     {
-        DWORD sidLen       = GetLengthSid(userSid);
-        token->Owner.Owner = (PSID)FunctionTable.AllocateLsaHeap(sidLen);
-        if (token->Owner.Owner)
+        const wchar_t* privList[] = {L"SeChangeNotifyPrivilege",
+                                     L"SeImpersonatePrivilege",
+                                     L"SeIncreaseWorkingSetPrivilege",
+                                     L"SeShutdownPrivilege",
+                                     L"SeTimeZonePrivilege"};
+        int            numPrivs   = ARRAYSIZE(privList);
+        DWORD privSize = sizeof(TOKEN_PRIVILEGES) + (numPrivs - 1) * sizeof(LUID_AND_ATTRIBUTES);
+        TOKEN_PRIVILEGES* pPrivs = (TOKEN_PRIVILEGES*)FunctionTable.AllocateLsaHeap(privSize);
+        if (pPrivs)
         {
-            CopySid(sidLen, token->Owner.Owner, userSid);
+            pPrivs->PrivilegeCount = 0;
+            for (int i = 0; i < numPrivs; i++)
+            {
+                if (LookupPrivilegeValueW(
+                        nullptr, privList[i], &pPrivs->Privileges[pPrivs->PrivilegeCount].Luid))
+                {
+                    pPrivs->Privileges[pPrivs->PrivilegeCount].Attributes = SE_PRIVILEGE_ENABLED;
+                    pPrivs->PrivilegeCount++;
+                }
+            }
+            token->Privileges = pPrivs;
         }
     }
-    // PSID Owner not currently configured
-    // token->Owner.Owner = (PSID) nullptr;
 
-    // 3. 设置 DefaultDacl (核心中的核心)
-    // 这个 DACL 至少要允许用户自己拥有全权，允许系统 (SYSTEM) 拥有全权
-    PACL             pDacl = NULL;
-    EXPLICIT_ACCESSW ea[2] = {};
+    // 5. 设置 Owner
+    DWORD userSidLen   = GetLengthSid(userSid);
+    token->Owner.Owner = (PSID)FunctionTable.AllocateLsaHeap(userSidLen);
+    CopySid(userSidLen, token->Owner.Owner, userSid);
 
-    // 允许用户自己
-    ea[0].grfAccessPermissions = GENERIC_ALL;
-    ea[0].grfAccessMode        = SET_ACCESS;
-    ea[0].grfInheritance       = NO_INHERITANCE;
-    ea[0].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
-    ea[0].Trustee.ptstrName    = (LPWSTR)userSid;
+    // 6. 设置 Default DACL (核心修正：允许 Logon SID 访问)
+    {
+        // 我们需要 3 个 ACE: User, System, LogonSID
+        PSID logonSid = nullptr;
+        // 在 Groups 中找到刚才存进去的 Logon SID
+        for (DWORD i = 0; i < token->Groups->GroupCount; i++)
+        {
+            if (token->Groups->Groups[i].Attributes & SE_GROUP_LOGON_ID)
+            {
+                logonSid = token->Groups->Groups[i].Sid;
+                break;
+            }
+        }
 
-    // 允许 SYSTEM 组
-    PSID                     systemSid = NULL;
-    SID_IDENTIFIER_AUTHORITY ntAuth    = SECURITY_NT_AUTHORITY;
-    AllocateAndInitializeSid(
-        &ntAuth, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0, &systemSid);
+        PACL             pDacl = NULL;
+        EXPLICIT_ACCESSW ea[3] = {};
 
-    ea[1].grfAccessPermissions = GENERIC_ALL;
-    ea[1].grfAccessMode        = SET_ACCESS;
-    ea[1].grfInheritance       = NO_INHERITANCE;
-    ea[1].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
-    ea[1].Trustee.ptstrName    = (LPWSTR)systemSid;
+        // User
+        ea[0].grfAccessPermissions = GENERIC_ALL;
+        ea[0].grfAccessMode        = SET_ACCESS;
+        ea[0].grfInheritance       = NO_INHERITANCE;
+        ea[0].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+        ea[0].Trustee.ptstrName    = (LPWSTR)userSid;
 
-    SetEntriesInAclW(2, ea, NULL, &pDacl);
+        // SYSTEM
+        PSID                     sysSid = NULL;
+        SID_IDENTIFIER_AUTHORITY ntAuth = SECURITY_NT_AUTHORITY;
+        AllocateAndInitializeSid(
+            &ntAuth, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0, &sysSid);
+        ea[1].grfAccessPermissions = GENERIC_ALL;
+        ea[1].grfAccessMode        = SET_ACCESS;
+        ea[1].grfInheritance       = NO_INHERITANCE;
+        ea[1].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+        ea[1].Trustee.ptstrName    = (LPWSTR)sysSid;
 
-    // 拷贝到 LSA 堆
-    DWORD daclSize                 = pDacl->AclSize;
-    token->DefaultDacl.DefaultDacl = (PACL)FunctionTable.AllocateLsaHeap(daclSize);
-    memcpy(token->DefaultDacl.DefaultDacl, pDacl, daclSize);
+        // Logon SID (至关重要)
+        ea[2].grfAccessPermissions = GENERIC_ALL;
+        ea[2].grfAccessMode        = SET_ACCESS;
+        ea[2].grfInheritance       = NO_INHERITANCE;
+        ea[2].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+        ea[2].Trustee.ptstrName    = (LPWSTR)logonSid;
 
-    LocalFree(pDacl);
-    FreeSid(systemSid);
-    // PACL DefaultDacl not currently configured
-    // token->DefaultDacl.DefaultDacl = nullptr;
+        SetEntriesInAclW(3, ea, NULL, &pDacl);
 
-    // assign outputs
+        DWORD daclSize                 = pDacl->AclSize;
+        token->DefaultDacl.DefaultDacl = (PACL)FunctionTable.AllocateLsaHeap(daclSize);
+        memcpy(token->DefaultDacl.DefaultDacl, pDacl, daclSize);
+
+        LocalFree(pDacl);
+        FreeSid(sysSid);
+    }
+
     *Token     = token;
     *SubStatus = STATUS_SUCCESS;
     return STATUS_SUCCESS;

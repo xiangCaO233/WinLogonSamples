@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file CSampleProvider.cpp
  * @brief 示例凭据提供程序的管理器实现。
  *

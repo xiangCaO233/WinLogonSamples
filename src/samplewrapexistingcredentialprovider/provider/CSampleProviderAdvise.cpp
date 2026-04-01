@@ -1,4 +1,4 @@
-#include "CSampleProvider.h"
+﻿#include "CSampleProvider.h"
 
 /**
  * @brief 注册事件回调。

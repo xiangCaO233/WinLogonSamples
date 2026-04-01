@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file CSampleProvider.h
  * @brief 凭据提供程序管理器类定义。
  *
@@ -24,10 +24,49 @@
 using Microsoft::WRL::ComPtr;
 
 /**
+ * @var s_rgCredProvFieldDescriptors
+ * @brief 控件描述符数组。
+ * @details 定义了每个控件的类型和名称。Windows 通过这个表来构建 UI。
+ */
+static const CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR s_rgCredProvFieldDescriptors[] = {
+    {
+        SFI_I_WORK_IN_STATIC,           // 字段 ID
+        CPFT_SMALL_TEXT,                // 控件类型：小文本域
+        const_cast<LPWSTR>(L"IWorkIn")  // 控件的内部程序名（非显示文本）
+    },
+    {
+        SFI_DATABASE_COMBOBOX,           // 字段 ID
+        CPFT_COMBOBOX,                   // 控件类型：组合框（下拉列表）
+        const_cast<LPWSTR>(L"Database")  // 控件的内部程序名
+    },
+    {
+        SFI_AUTH_CODE_INPUT,                 // 字段 ID
+        CPFT_PASSWORD_TEXT,                  // 控件类型：密码输入框（输入内容会变成圆点）
+        const_cast<LPWSTR>(L"请输入授权码")  // 控件的占位提示文本
+    },
+};
+
+/**
+ * @var s_rgDatabases
+ * @brief 下拉框的内容数据。
+ * @details 这是一个静态模拟数据库，用户在组合框中看到并选择这些选项。
+ */
+static const PWSTR s_rgDatabases[] = {
+    const_cast<PWSTR>(L"Operations"),       // 运营部
+    const_cast<PWSTR>(L"Human Resources"),  // 人力资源部
+    const_cast<PWSTR>(L"Sales"),            // 销售部
+    const_cast<PWSTR>(L"Finance"),          // 财务部
+};
+
+/**
  * @class CSampleProvider
  * @brief 示例凭据提供程序的主控类。
  */
-class CSampleProvider : public ICredentialProvider, public ICredentialProviderSetUserArray
+class CSampleProvider : public ICredentialProvider
+#ifndef BUILD_FOR_WIN7
+    ,
+                        public ICredentialProviderSetUserArray
+#endif
 {
   public:
     // --- IUnknown 接口实现 (COM 基础) ---
@@ -56,6 +95,7 @@ class CSampleProvider : public ICredentialProvider, public ICredentialProviderSe
         return cRef;
     }
 
+#ifndef BUILD_FOR_WIN7
     // 实现 ICredentialProviderSetUserArray
     IFACEMETHODIMP SetUserArray(__in ICredentialProviderUserArray* users) override
     {
@@ -76,6 +116,7 @@ class CSampleProvider : public ICredentialProvider, public ICredentialProviderSe
         }
         return hr;
     }
+#endif
     /**
      * @brief 接口查询。
      * @details 系统通过此方法确认该对象是否支持 ICredentialProvider 接口。
@@ -83,8 +124,10 @@ class CSampleProvider : public ICredentialProvider, public ICredentialProviderSe
     IFACEMETHODIMP QueryInterface(__in REFIID riid, __deref_out void** ppv) override
     {
         static const QITAB qit[] = {
-            QITABENT(CSampleProvider, ICredentialProvider),              // 暴露给系统的核心接口
+            QITABENT(CSampleProvider, ICredentialProvider),  // 暴露给系统的核心接口
+#ifndef BUILD_FOR_WIN7
             QITABENT(CSampleProvider, ICredentialProviderSetUserArray),  // 新增
+#endif
             {0},
         };
         return QISearch(this, qit, riid, ppv);

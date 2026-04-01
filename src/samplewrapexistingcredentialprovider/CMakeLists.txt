@@ -25,6 +25,7 @@ target_link_libraries(SampleWrapExistingCredentialProvider
 		credui.lib
 		ole32.lib # COM 需要
 		user32.lib # 以后可能用到
+		uuid.lib
 		Secur32.lib
 )
 

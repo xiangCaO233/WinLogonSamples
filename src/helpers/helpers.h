@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file helpers.h
  * @brief Windows 凭据提供程序 (Credential Provider) 辅助函数集合
  *

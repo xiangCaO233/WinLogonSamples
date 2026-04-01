@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file guid.h
  * @brief 定义组件的唯一标识符 (CLSID)。
  *
