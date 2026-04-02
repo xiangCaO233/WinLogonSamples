@@ -1,6 +1,7 @@
 ﻿#include "PrepareToken.hpp"
 #include "PrepareProfile.hpp"
 #include "Utils.hpp"
+#include "LSASecFuncTableImpl.h"
 
 // exported symbols
 #pragma comment(linker, "/export:SpLsaModeInitialize")
@@ -11,7 +12,7 @@ LSA_SECPKG_FUNCTION_TABLE FunctionTable;
 NTSTATUS NTAPI SpInitialize(_In_ ULONG_PTR PackageId, _In_ SECPKG_PARAMETERS* Parameters,
                             _In_ LSA_SECPKG_FUNCTION_TABLE* functionTable)
 {
-    LogMessage("SpInitialize");
+    LogMessage("SpInitialize Called");
 
     LogMessage("  PackageId: %u", PackageId);
     LogMessage("  Version: %u", Parameters->Version);
@@ -269,6 +270,140 @@ extern "C" NTSTATUS NTAPI SpLsaModeInitialize(_In_ ULONG LsaVersion, _Out_ ULONG
     SecurityPackageFunctionTable.LogonTerminated =
         reinterpret_cast<decltype(SecurityPackageFunctionTable.LogonTerminated)>(
             LsaApLogonTerminated);
+
+    // === 以下是所有其他须填的回调函数 ===
+
+    // SecurityPackageFunctionTable.InitializePackage =
+    //     reinterpret_cast<decltype(SecurityPackageFunctionTable.InitializePackage)>(
+    //         LsaApInitializePackage);
+
+    SecurityPackageFunctionTable.CallPackage =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.CallPackage)>(LsaApCallPackage);
+
+    SecurityPackageFunctionTable.CallPackageUntrusted =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.CallPackageUntrusted)>(
+            LsaApCallPackageUntrusted);
+
+    SecurityPackageFunctionTable.CallPackagePassthrough =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.CallPackagePassthrough)>(
+            LsaApCallPackagePassthrough);
+
+    SecurityPackageFunctionTable.PreLogonUserSurrogate =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.PreLogonUserSurrogate)>(
+            LsaApPreLogonUserSurrogate);
+
+    SecurityPackageFunctionTable.PostLogonUserSurrogate =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.PostLogonUserSurrogate)>(
+            LsaApPostLogonUserSurrogate);
+
+    SecurityPackageFunctionTable.PostLogonUser =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.PostLogonUser)>(LsaApPostLogonUser);
+
+    SecurityPackageFunctionTable.AcceptCredentials =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.AcceptCredentials)>(
+            SpAcceptCredentials);
+
+    SecurityPackageFunctionTable.AcquireCredentialsHandle =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.AcquireCredentialsHandle)>(
+            SpAcquireCredentialsHandle);
+
+    SecurityPackageFunctionTable.QueryCredentialsAttributes =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.QueryCredentialsAttributes)>(
+            SpQueryCredentialsAttributes);
+
+    SecurityPackageFunctionTable.FreeCredentialsHandle =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.FreeCredentialsHandle)>(
+            SpFreeCredentialsHandle);
+
+    SecurityPackageFunctionTable.SaveCredentials =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.SaveCredentials)>(SpSaveCredentials);
+
+    SecurityPackageFunctionTable.GetCredentials =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.GetCredentials)>(SpGetCredentials);
+
+    SecurityPackageFunctionTable.DeleteCredentials =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.DeleteCredentials)>(
+            SpDeleteCredentials);
+
+    SecurityPackageFunctionTable.InitLsaModeContext =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.InitLsaModeContext)>(
+            SpInitLsaModeContext);
+
+    SecurityPackageFunctionTable.AcceptLsaModeContext =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.AcceptLsaModeContext)>(
+            SpAcceptLsaModeContext);
+
+    SecurityPackageFunctionTable.DeleteContext =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.DeleteContext)>(SpDeleteContext);
+
+    SecurityPackageFunctionTable.ApplyControlToken =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.ApplyControlToken)>(
+            SpApplyControlToken);
+
+    SecurityPackageFunctionTable.GetUserInfo =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.GetUserInfo)>(SpGetUserInfo);
+
+    SecurityPackageFunctionTable.GetExtendedInformation =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.GetExtendedInformation)>(
+            SpGetExtendedInformation);
+
+    SecurityPackageFunctionTable.QueryContextAttributes =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.QueryContextAttributes)>(
+            SpQueryContextAttributes);
+
+    SecurityPackageFunctionTable.AddCredentials =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.AddCredentials)>(SpAddCredentials);
+
+    SecurityPackageFunctionTable.SetExtendedInformation =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.SetExtendedInformation)>(
+            SpSetExtendedInformation);
+
+    SecurityPackageFunctionTable.SetContextAttributes =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.SetContextAttributes)>(
+            SpSetContextAttributes);
+
+    SecurityPackageFunctionTable.SetCredentialsAttributes =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.SetCredentialsAttributes)>(
+            SpSetCredentialsAttributes);
+
+    SecurityPackageFunctionTable.ChangeAccountPassword =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.ChangeAccountPassword)>(
+            SpChangeAccountPassword);
+
+    SecurityPackageFunctionTable.QueryMetaData =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.QueryMetaData)>(SpQueryMetaData);
+
+    SecurityPackageFunctionTable.ExchangeMetaData =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.ExchangeMetaData)>(
+            SpExchangeMetaData);
+
+    SecurityPackageFunctionTable.GetCredUIContext =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.GetCredUIContext)>(
+            SpGetCredUIContext);
+
+    SecurityPackageFunctionTable.UpdateCredentials =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.UpdateCredentials)>(
+            SpUpdateCredentials);
+
+    SecurityPackageFunctionTable.ValidateTargetInfo =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.ValidateTargetInfo)>(
+            SpValidateTargetInfo);
+
+    SecurityPackageFunctionTable.GetRemoteCredGuardLogonBuffer =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.GetRemoteCredGuardLogonBuffer)>(
+            SpGetRemoteCredGuardLogonBuffer);
+
+    SecurityPackageFunctionTable.GetRemoteCredGuardSupplementalCreds = reinterpret_cast<
+        decltype(SecurityPackageFunctionTable.GetRemoteCredGuardSupplementalCreds)>(
+        SpGetRemoteCredGuardSupplementalCreds);
+
+    SecurityPackageFunctionTable.GetTbalSupplementalCreds =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.GetTbalSupplementalCreds)>(
+            SpGetTbalSupplementalCreds);
+
+    SecurityPackageFunctionTable.ExtractTargetInfo =
+        reinterpret_cast<decltype(SecurityPackageFunctionTable.ExtractTargetInfo)>(
+            SpExtractTargetInfo);
 
     // --------------------------------
 

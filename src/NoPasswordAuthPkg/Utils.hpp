@@ -28,6 +28,7 @@ inline void LogMessage(const char* message, ...)
     }
     fprintf(file, "\n");
     fclose(file);
+    OutputDebugString(("[SSP/AP] " + std::string(message) + "\n").c_str());
 #endif
 }
 
