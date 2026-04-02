@@ -100,10 +100,10 @@ NTSTATUS LsaApLogonUser(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ SECURITY_LO
                         _Outptr_ VOID** TokenInformation, _Out_ LSA_UNICODE_STRING** AccountName,
                         _Out_ LSA_UNICODE_STRING** AuthenticatingAuthority)
 {
-    LogMessage("LsaApLogonUser");
+    LogMessage("LsaApLogonUser Called");
 
+    // 1. 初始化/清理输出参数
     {
-        // clear output arguments first in case of failure
         *ProfileBuffer        = nullptr;
         *ProfileBufferSize    = 0;
         *LogonId              = {};
@@ -115,39 +115,40 @@ NTSTATUS LsaApLogonUser(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ SECURITY_LO
             *AuthenticatingAuthority = nullptr;
     }
 
-    // input arguments
-    LogMessage("  LogonType: %i", LogonType);  // Interactive=2, RemoteInteractive=10
-    ClientBufferBase;
-    LogMessage("  ProtocolSubmitBuffer size: %i", SubmitBufferSize);
-
-    // deliberately restrict supported logontypes
+    // 2. 校验登录类型
     if ((LogonType != Interactive) && (LogonType != RemoteInteractive))
     {
-        LogMessage("  return STATUS_NOT_IMPLEMENTED (unsupported LogonType)");
+        LogMessage("  return STATUS_NOT_IMPLEMENTED (unsupported LogonType: %i)", LogonType);
         return STATUS_NOT_IMPLEMENTED;
     }
 
-    // authentication credentials passed by client
-    auto* logonInfo = (MSV1_0_INTERACTIVE_LOGON*)ProtocolSubmitBuffer;
+    // 3. 校验输入缓冲区
+    if (SubmitBufferSize < sizeof(MSV1_0_INTERACTIVE_LOGON))
     {
-        if (SubmitBufferSize < sizeof(MSV1_0_INTERACTIVE_LOGON))
-        {
-            LogMessage("  ERROR: SubmitBufferSize too small");
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        // make relative pointers absolute to ease later access
-        logonInfo->LogonDomainName.Buffer =
-            (wchar_t*)((BYTE*)logonInfo + (size_t)logonInfo->LogonDomainName.Buffer);
-        logonInfo->UserName.Buffer =
-            (wchar_t*)((BYTE*)logonInfo + (size_t)logonInfo->UserName.Buffer);
-        logonInfo->Password.Buffer =
-            (wchar_t*)((BYTE*)logonInfo + (size_t)logonInfo->Password.Buffer);
+        LogMessage("  ERROR: SubmitBufferSize too small");
+        return STATUS_INVALID_PARAMETER;
     }
 
-    // assign output arguments
+    // =========================================================================
+    // 关键修复点：不要直接在 ProtocolSubmitBuffer 上改！
+    // 我们创建一个本地副本，处理副本里的指针，这样 LSA 原始缓冲区里的相对偏移就不会被破坏
+    // =========================================================================
+    auto logonInfoRaw = *(MSV1_0_INTERACTIVE_LOGON*)ProtocolSubmitBuffer;
 
+    // 将副本中的相对偏移转换为绝对指针，方便我们函数内部使用
+    logonInfoRaw.LogonDomainName.Buffer =
+        (wchar_t*)((BYTE*)ProtocolSubmitBuffer + (ULONG_PTR)logonInfoRaw.LogonDomainName.Buffer);
+    logonInfoRaw.UserName.Buffer =
+        (wchar_t*)((BYTE*)ProtocolSubmitBuffer + (ULONG_PTR)logonInfoRaw.UserName.Buffer);
+    logonInfoRaw.Password.Buffer =
+        (wchar_t*)((BYTE*)ProtocolSubmitBuffer + (ULONG_PTR)logonInfoRaw.Password.Buffer);
 
+    LogMessage("  Attempting logon for User: %ls , Domain: %ls, Passwd: %ls",
+               logonInfoRaw.UserName.Buffer,
+               logonInfoRaw.LogonDomainName.Buffer,
+               logonInfoRaw.Password.Buffer);
+
+    // 获取计算机名
     wchar_t computerName[MAX_COMPUTERNAME_LENGTH + 1] = {};
     DWORD   computerNameSize                          = ARRAYSIZE(computerName);
     if (!GetComputerNameW(computerName, &computerNameSize))
@@ -156,79 +157,70 @@ NTSTATUS LsaApLogonUser(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ SECURITY_LO
         return STATUS_INTERNAL_ERROR;
     }
 
-    // assign "ProfileBuffer" output argument
-    *ProfileBufferSize = GetProfileBufferSize(computerName, *logonInfo);
-    FunctionTable.AllocateClientBuffer(
-        ClientRequest, *ProfileBufferSize, ProfileBuffer);  // will update *ProfileBuffer
-
-    std::vector<BYTE> profileBuffer =
-        PrepareProfileBuffer(computerName, *logonInfo, (BYTE*)*ProfileBuffer);
-    FunctionTable.CopyToClientBuffer(ClientRequest,
-                                     (ULONG)profileBuffer.size(),
-                                     *ProfileBuffer,
-                                     profileBuffer.data());  // copy to caller process
-
-
+    // 4. 分配并准备 ProfileBuffer
+    *ProfileBufferSize = GetProfileBufferSize(computerName, logonInfoRaw);
+    NTSTATUS allocStatus =
+        FunctionTable.AllocateClientBuffer(ClientRequest, *ProfileBufferSize, ProfileBuffer);
+    if (allocStatus != STATUS_SUCCESS)
     {
-        // assign "LogonId" output argument
-        if (!AllocateLocallyUniqueId(LogonId))
-        {
-            LogMessage("  ERROR: AllocateLocallyUniqueId failed");
-            return STATUS_FAIL_FAST_EXCEPTION;
-        }
-        NTSTATUS status = FunctionTable.CreateLogonSession(LogonId);
-        if (status != STATUS_SUCCESS)
-        {
-            LogMessage("  ERROR: CreateLogonSession failed with err: 0x%x", status);
-            return status;
-        }
-
-        LogMessage("  LogonId: High=0x%x , Low=0x%x", LogonId->HighPart, LogonId->LowPart);
+        LogMessage("  ERROR: AllocateClientBuffer failed: 0x%x", allocStatus);
+        return allocStatus;
     }
 
-    *SubStatus = STATUS_SUCCESS;  // reason for error
+    std::vector<BYTE> profileData =
+        PrepareProfileBuffer(computerName, logonInfoRaw, (BYTE*)*ProfileBuffer);
+    FunctionTable.CopyToClientBuffer(
+        ClientRequest, (ULONG)profileData.size(), *ProfileBuffer, profileData.data());
 
+    // 5. 分配 LogonId 并创建会话
+    if (!AllocateLocallyUniqueId(LogonId))
     {
-        // Assign "TokenInformation" output argument
+        LogMessage("  ERROR: AllocateLocallyUniqueId failed");
+        return STATUS_FAIL_FAST_EXCEPTION;
+    }
+
+    NTSTATUS sessionStatus = FunctionTable.CreateLogonSession(LogonId);
+    if (sessionStatus != STATUS_SUCCESS)
+    {
+        LogMessage("  ERROR: CreateLogonSession failed: 0x%x", sessionStatus);
+        return sessionStatus;
+    }
+    LogMessage("  LogonSession Created: 0x%x:%08x", LogonId->HighPart, LogonId->LowPart);
+
+    // 6. 将用户名转换为 Token (关键步骤)
+    {
         LSA_TOKEN_INFORMATION_V1* tokenInfo = nullptr;
         NTSTATUS                  subStatus = 0;
 
-        // 关键修改：传入 &LogonId
-        NTSTATUS status = UserNameToToken(
-            &logonInfo->UserName, LogonId, (LSA_TOKEN_INFORMATION_V1**)&tokenInfo, &subStatus);
+        // 使用副本里的用户名
+        NTSTATUS tokenStatus =
+            UserNameToToken(&logonInfoRaw.UserName, LogonId, &tokenInfo, &subStatus);
 
-        if (status != STATUS_SUCCESS)
+        if (tokenStatus != STATUS_SUCCESS)
         {
-            LogMessage("ERROR: UserNameToToken failed with err: 0x%x", status);
+            LogMessage("  ERROR: UserNameToToken failed: 0x%x", tokenStatus);
             *SubStatus = subStatus;
-            return status;
+            return tokenStatus;
         }
 
         *TokenInformationType = LsaTokenInformationV1;
         *TokenInformation     = tokenInfo;
     }
 
-    {
-        // assign "AccountName" output argument
-        LogMessage("  AccountName: %ls", ToWstring(logonInfo->UserName).c_str());
-        *AccountName = CreateLsaUnicodeString(logonInfo->UserName.Buffer,
-                                              logonInfo->UserName.Length);  // mandatory
-    }
+    // 7. 设置 AccountName (必须从 LSA 堆分配)
+    *AccountName =
+        CreateLsaUnicodeString(logonInfoRaw.UserName.Buffer, logonInfoRaw.UserName.Length);
 
-    // 8. 设置 AccountName（必须从 LSA 堆分配）
-    *AccountName = CreateLsaUnicodeString(logonInfo->UserName.Buffer, logonInfo->UserName.Length);
-
-    // 9. 设置 AuthenticatingAuthority (解决注销崩溃的关键！)
+    // 8. 设置 AuthenticatingAuthority (解决注销崩溃/二次登录失败)
     if (AuthenticatingAuthority)
     {
-        // 核心修改点：对于本地账户，这个值必须是计算机名。
-        // 如果设置为 "." 或空，第二次登录时 ProfSvc 会因为 SID 校验失败而崩溃。
         LogMessage("  Setting AuthenticatingAuthority to: %ls", computerName);
         *AuthenticatingAuthority =
             CreateLsaUnicodeString(computerName, (USHORT)(wcslen(computerName) * sizeof(wchar_t)));
     }
 
-    LogMessage("  return STATUS_SUCCESS");
+    *SubStatus = STATUS_SUCCESS;
+    LogMessage("  LsaApLogonUser Success");
     return STATUS_SUCCESS;
 }
 
